@@ -4,28 +4,22 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <stdint.h>
 #include <stdio.h>
-#include "ulp_lp_core_utils.h"
-#include "ulp_lp_core_interrupts.h"
+#include <ulp_lp_core.h>
+#include <ulp_lp_core_utils.h>
+// #include <ulp_lp_core_i2c.h> // Uncomment later when doing Phase 3
 
-volatile uint32_t lp_core_pmu_intr_count;
-
-void ulp_lp_core_lp_pmu_intr_handler(void)
+void main(void)
 {
-	ulp_lp_core_sw_intr_clear();
-	lp_core_pmu_intr_count++;
-	printf("LP PMU interrupt received: %d\n", lp_core_pmu_intr_count);
-}
-
-int main(void)
-{
-	lp_core_pmu_intr_count = 0;
-	ulp_lp_core_intr_enable();
-	ulp_lp_core_sw_intr_enable(true);
-
-	while (1) {
-		/* Wait forever, handling interrupts */
-		asm volatile("wfi");
-	}
-	return 0;
+    int i=0;
+    while (1) {
+	printf("LP core loop %d\n", ++i);
+        // 1. Wake up the HP Core
+        ulp_lp_core_wakeup_main_processor();
+	
+        // 2. Sleep for 5 seconds (Throttle the wakeups to measure power)
+        ulp_lp_core_delay_us(5000000);
+    }
+    return 0;
 }
