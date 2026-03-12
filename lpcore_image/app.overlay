@@ -8,11 +8,7 @@
         mbox_consumer {
                compatible = "vnd,mbox-consumer";
                mboxes = <&mbox0 0>, <&mbox0 1>;
-	       mbox-names = "tx", "rx";
+	       mbox-names = "rx", "tx";
         };
 };
 
-&lp_uart {
-	status = "okay";
-        current-speed = <115200>;
-};

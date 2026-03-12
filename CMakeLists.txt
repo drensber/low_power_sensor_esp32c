@@ -8,10 +8,8 @@ set(LP_FULL_BIN ${CMAKE_BINARY_DIR}/../low_power_sensor_lpcore/zephyr/zephyr.bin
 set(LP_STRIPPED_BIN ${CMAKE_BINARY_DIR}/../low_power_sensor_lpcore/zephyr/zephyr_stripped.bin)
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
-
 message(STATUS "${CONFIG_BOARD_TARGET} compile as Master in this sample")
 project(low_power_sensor_hpcore)
-
 
 if(CONFIG_LPS_EXPLICIT_LP_IMAGE_LOADING)
     # This creates a recipe to produce 'zephyr_stripped.bin'
@@ -28,6 +26,8 @@ if(CONFIG_LPS_EXPLICIT_LP_IMAGE_LOADING)
     # This ensures 'zephyr_stripped.bin' exists BEFORE 'src/main.c' or 'src/lp_firmware.S' are compiled.
     add_dependencies(app prepare_lp_binary)
 endif()
+
+zephyr_include_directories(include)
 
 target_sources(app PRIVATE src/main.c)
 
