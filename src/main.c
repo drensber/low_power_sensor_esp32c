@@ -1,4 +1,6 @@
 /*
+ * main() routine for the high performance core image.
+ *
  * Copyright (c) 2025 Espressif Systems (Shanghai) Co., Ltd.
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -20,14 +22,15 @@ extern const uint8_t ulp_lp_core_app_start[];
 extern const uint8_t ulp_lp_core_app_end[];
 #endif // CONFIG_LPS_EXPLICIT_LP_IMAGE_LOADING
 
-static RTC_DATA_ATTR uint32_t hp_wake_count;
+static RTC_DATA_ATTR uint32_t hp_wake_count = 0;
+static RTC_DATA_ATTR uint32_t callback_count = 0;
 
-
-const RTC_DATA_ATTR struct mbox_dt_spec rx_channel = MBOX_DT_SPEC_GET(DT_PATH(mbox_consumer), rx);
+const struct mbox_dt_spec rx_channel = MBOX_DT_SPEC_GET(DT_PATH(mbox_consumer), rx);
 static mbox_channel_id_t g_mbox_received_data;
 static mbox_channel_id_t g_mbox_received_channel;
 
-static bool mbox_message_received = false;
+static volatile bool mbox_message_received = false;
+
 
 #if 1
 static void callback(const struct device *dev, mbox_channel_id_t channel_id, void *user_data,
@@ -38,7 +41,9 @@ static void callback(const struct device *dev, mbox_channel_id_t channel_id, voi
     memcpy(&g_mbox_received_data, data->data, 4);
 
     g_mbox_received_channel = channel_id;
-    mbox_message_received = true;
+    if (callback_count++ > 0) {
+	mbox_message_received = true;
+    }
 }
 #endif
 
@@ -56,7 +61,7 @@ int main(void)
     // 1. Check wakeup cause
     hwinfo_get_reset_cause(&cause);
 
-    if (cause & RESET_LOW_POWER_WAKE) {
+    if (cause & RESET_LOW_POWER_WAKE || hp_wake_count == 0) {
         printk(">>> HP WAKE: Woken by LP Core! <<<\n");
         // TODO: Do your WiFi/Bluetooth work here
 
@@ -121,8 +126,10 @@ int main(void)
     }
 
     
-    printk(">>> HP SLEEP: Entering Deep Sleep... %d <<<\n", hp_wake_count++);
+    printk(">>> HP SLEEP: Entering Deep Sleep... %d <<<\n", hp_wake_count);
     
+    hp_wake_count++;
+	
     // 2. Allow UART to flush before cutting power
     k_msleep(50); 
 

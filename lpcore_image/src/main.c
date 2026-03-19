@@ -1,4 +1,6 @@
 /*
+ * main() routine for the low power core image.
+ * 
  * Copyright (c) 2025 Espressif Systems (Shanghai) Co., Ltd.
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -16,17 +18,15 @@
 // #include "ulp_lp_core_i2c.h" // Uncomment later when doing Phase 3
 
 
+static struct mbox_msg msg = {0};
+static RTC_DATA_ATTR uint32_t mbox_message = 3041973;
+
+const struct mbox_dt_spec tx_channel = MBOX_DT_SPEC_GET(DT_PATH(mbox_consumer), tx);
+
 static RTC_DATA_ATTR uint32_t lp_wake_count;
-static RTC_DATA_ATTR struct mbox_msg msg = {0};
-
-const RTC_DATA_ATTR struct mbox_dt_spec tx_channel = MBOX_DT_SPEC_GET(DT_PATH(mbox_consumer), tx);
-
 
 int main(void)
 {
-
-    uint32_t mbox_message = 3041973;
-
     //int max_transfer_size_bytes = mbox_mtu_get_dt(&tx_channel);
     int max_transfer_size_bytes = 4;
     
@@ -34,7 +34,7 @@ int main(void)
     // 1. Wake up the HP Core
     ulp_lp_core_wakeup_main_processor();
 
-    ulp_lp_core_delay_us(5000000);
+    k_msleep(1000);
 
     msg.data = &mbox_message;
     msg.size = max_transfer_size_bytes;
@@ -42,12 +42,13 @@ int main(void)
     printf("Calling mbox_send with msg.data=%d, msg.size=%d\n",
 	   *((uint32_t *) msg.data), msg.size);
 
-    if (lp_wake_count != 0) {
-	if (mbox_send_dt(&tx_channel, &msg) < 0) {
+    if (mbox_send_dt(&tx_channel, &msg) < 0) {
 	    printf("mbox_send() error\n");
 	}
-    }
-    
+
+    k_msleep(100);
+
+    mbox_message++;
     lp_wake_count++;
     printf("Going to sleep\n");
     
@@ -60,7 +61,7 @@ int main(void)
     }
 	
     //Busy wait to let the printf UART finish
-    ulp_lp_core_delay_us(10000);
+    ulp_lp_core_delay_us(500);
     
     ulp_lp_core_halt();
 
