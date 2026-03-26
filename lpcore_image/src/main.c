@@ -15,22 +15,19 @@
 #include "esp_attr.h"
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/mbox.h>
-// #include "ulp_lp_core_i2c.h" // Uncomment later when doing Phase 3
 
 #include "shared_data.h"
 
+extern void read_aht20(lp_shared_data_t *);
+
 static struct mbox_msg msg = {0};
-static RTC_DATA_ATTR lp_shared_data_t mbox_message = {
-    .lp_wake_count = 0,
-    .last_sensor_value = 3041973,
-};
+static RTC_DATA_ATTR lp_shared_data_t mbox_message = {0};
 
 const struct mbox_dt_spec tx_channel = MBOX_DT_SPEC_GET(DT_PATH(mbox_consumer), tx);
 
-static RTC_DATA_ATTR uint32_t lp_wake_count;
-
 int main(void)
 {
+
     int max_transfer_size_bytes = mbox_mtu_get_dt(&tx_channel);
     int mbox_message_size = sizeof(mbox_message);
     
@@ -40,18 +37,28 @@ int main(void)
     }
     
     printf("LP core loop %d\n", mbox_message.lp_wake_count);
+
+    mbox_message.lp_wake_count++;
+
+    read_aht20(&mbox_message);    
+
     // 1. Wake up the HP Core
     ulp_lp_core_wakeup_main_processor();
-
+    mbox_message.hp_wake_count++;
     k_msleep(1000);
 
     msg.data = &mbox_message;
     msg.size = mbox_message_size;
-
-    printf("Calling mbox_send with lp_wake_count=%d, last_sensor_value=%d, msg.size=%d\n",
+    
+    printf("Calling mbox_send with:\n"
+	   "  .lp_wake_count=%d\n"
+	   "  .hp_wake_count=%d\n"
+	   "  .temp_c_x10=%d\n"
+	   "  .rh_x10=%d\n",
 	   ((lp_shared_data_t *) msg.data)->lp_wake_count,
-	   ((lp_shared_data_t *) msg.data)->last_sensor_value,
-	   msg.size);
+	   ((lp_shared_data_t *) msg.data)->hp_wake_count,	   
+	   ((lp_shared_data_t *) msg.data)->temp_c_x10,
+	   ((lp_shared_data_t *) msg.data)->rh_x10);
 
     if (mbox_send_dt(&tx_channel, &msg) < 0) {
 	    printf("mbox_send() error\n");
@@ -59,8 +66,6 @@ int main(void)
 
     k_msleep(100);
 
-    mbox_message.last_sensor_value++;
-    mbox_message.lp_wake_count++;
     printf("Going to sleep\n");
     
     ulp_lp_core_memory_shared_cfg_t *cfg

@@ -34,7 +34,6 @@ static mbox_channel_id_t g_mbox_received_channel;
 static volatile bool mbox_message_received = false;
 
 
-#if 1
 static void callback(const struct device *dev, mbox_channel_id_t channel_id, void *user_data,
 		     struct mbox_msg *data)
 {
@@ -48,12 +47,11 @@ static void callback(const struct device *dev, mbox_channel_id_t channel_id, voi
 	mbox_message_received = true;
     }
 }
-#endif
+
 
 int main(void)
 {
     uint32_t cause;
-
     
 #ifdef CONFIG_LPS_USE_LIGHT_SLEEP 
     static bool first_boot=true;
@@ -93,9 +91,15 @@ int main(void)
 
 	printk("mbox message received\n");
 
-	printk("Message value .lp_wake_count=%d, .last_sensor_value=%d\n",
+	printk("Message value received:\n"
+	       "  .lp_wake_count=%d\n"
+	       "  .hp_wake_count=%d\n"
+	       "  .temp_c_x10=%d\n"
+	       "  .rh_x10=%d\n",
 	       g_mbox_received_data.lp_wake_count,
-	       g_mbox_received_data.last_sensor_value);
+	       g_mbox_received_data.hp_wake_count,
+	       g_mbox_received_data.temp_c_x10,
+	       g_mbox_received_data.rh_x10);
 	
 	mbox_message_received = false;
 

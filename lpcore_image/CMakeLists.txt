@@ -8,6 +8,6 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 message(STATUS "${BOARD} compiles as lpcore_image in this build")
 project(low_power_sensor_lpcore)
 
-zephyr_include_directories(../include)
+zephyr_include_directories(include ../include)
 
-target_sources(app PRIVATE src/main.c)
+target_sources(app PRIVATE src/main.c src/aht20.c)
