@@ -29,6 +29,6 @@ endif()
 
 zephyr_include_directories(include)
 
-target_sources(app PRIVATE src/main.c)
+target_sources(app PRIVATE src/main.c src/lps_mqtt_client.c src/lps_wifi.c)
 
 target_sources_ifdef(CONFIG_LPS_EXPLICIT_LP_IMAGE_LOADING app PRIVATE src/lp_firmware.S)

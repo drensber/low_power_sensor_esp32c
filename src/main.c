@@ -19,6 +19,8 @@
 
 #include "shared_data.h"
 
+extern void lps_send_update(lp_shared_data_t *);
+
 #ifdef CONFIG_LPS_EXPLICIT_LP_IMAGE_LOADING    
 extern const uint8_t ulp_lp_core_app_start[];
 extern const uint8_t ulp_lp_core_app_end[];
@@ -26,6 +28,7 @@ extern const uint8_t ulp_lp_core_app_end[];
 
 static RTC_DATA_ATTR uint32_t hp_wake_count = 0;
 static RTC_DATA_ATTR uint32_t callback_count = 0;
+static RTC_DATA_ATTR bool first_boot=true;
 
 const struct mbox_dt_spec rx_channel = MBOX_DT_SPEC_GET(DT_PATH(mbox_consumer), rx);
 static lp_shared_data_t g_mbox_received_data;
@@ -52,19 +55,18 @@ static void callback(const struct device *dev, mbox_channel_id_t channel_id, voi
 int main(void)
 {
     uint32_t cause;
-    
-#ifdef CONFIG_LPS_USE_LIGHT_SLEEP 
-    static bool first_boot=true;
-    
+#if defined(CONFIG_LPS_USE_LIGHT_SLEEP) || defined(CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE)
     while (1) {
-#endif //CONFIG_LPS_USE_LIGHT_SLEEP
-	
+#endif
     // 1. Check wakeup cause
     hwinfo_get_reset_cause(&cause);
 
+#if !(defined(CONFIG_LPS_USE_LIGHT_SLEEP) || defined(CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE))    
     if (cause & RESET_LOW_POWER_WAKE || hp_wake_count == 0) {
+#else
+    if (true) {
+#endif
         printk(">>> HP WAKE: Woken by LP Core! <<<\n");
-        // TODO: Do your WiFi/Bluetooth work here
 
 	if (mbox_register_callback_dt(&rx_channel, callback, NULL)) {
 	    printk("mbox_register_callback() error\n");
@@ -103,14 +105,12 @@ int main(void)
 	
 	mbox_message_received = false;
 
+	lps_send_update(&g_mbox_received_data);
+	
         k_msleep(50); // Allow logs to flush
     }
 
-#ifdef CONFIG_LPS_USE_LIGHT_SLEEP    
     else if (first_boot)
-#else
-    else
-#endif //CONFIG_LPS_USE_LIGHT_SLEEP
     {	
 	printk(">>> HP BOOT: Cold start.\n");
 #ifdef CONFIG_LPS_EXPLICIT_LP_IMAGE_LOADING    	
@@ -126,9 +126,7 @@ int main(void)
         /* Start the LP Core */
         ulp_lp_core_run(&cfg);
 
-#ifdef CONFIG_LPS_USE_LIGHT_SLEEP   	
 	first_boot=false;
-#endif
 	
 	printk(" Done loading firmware. LP core started.\n");
 #endif // CONFIG_LPS_EXPLICIT_LP_IMAGE_LOADING
@@ -146,11 +144,16 @@ int main(void)
     esp_sleep_enable_ulp_wakeup();
 
     // 4. Power down or put the HP core to sleep
-#ifndef CONFIG_LPS_USE_LIGHT_SLEEP   	
+#ifndef CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE
+#ifndef CONFIG_LPS_USE_LIGHT_SLEEP
     esp_deep_sleep_start();
 #else
     esp_light_sleep_start();
+#endif // CONFIG_LPS_USE_LIGHT_SLEEP
+#endif // CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE
 
+#if defined(CONFIG_LPS_USE_LIGHT_SLEEP) || defined(CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE)    
     } // while (1) infinite loop
 #endif    
+
 }

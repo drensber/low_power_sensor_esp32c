@@ -15,3 +15,45 @@ config LPS_USE_LIGHT_SLEEP
     default n
     help
         "enable HP core light sleep mode"
+
+config LPS_HPCORE_ALWAYS_STAY_AWAKE
+    bool "Don't put the HP core to sleep (for debugging)"
+    default n
+    help
+        "enable HP core don't sleep"
+
+config LPS_MQTT_BROKER_ADDR
+    string "MQTT broker address"
+    default ""
+    help
+        "The address of the MQTT broker".
+
+config LPS_MQTT_BROKER_PORT
+    int "MQTT broker port"
+    default 1883
+    help
+        "The UDP port of the MQTT broker".
+
+config LPS_MQTT_BROKER_USERNAME
+    string "MQTT broker username"
+    default ""
+    help
+        "The username to connect to MQTT broker".
+
+config LPS_MQTT_BROKER_PASSWORD
+    string "MQTT broker password"
+    default ""
+    help
+        "The password to connect to MQTT broker".
+
+config LPS_IP_ADDR
+    string "Static IP Address"
+    default "192.168.1.100"
+
+config LPS_NETMASK
+    string "Static Netmask"
+    default "255.255.255.0"
+
+config LPS_GW
+    string "Static Gateway"
+    default "192.168.1.1"

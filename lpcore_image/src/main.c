@@ -1,7 +1,7 @@
 /*
  * main() routine for the low power core image.
  * 
- * Copyright (c) 2025 Espressif Systems (Shanghai) Co., Ltd.
+ * Copyright (c) 2025 Dave Rensberger
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -43,8 +43,10 @@ int main(void)
     read_aht20(&mbox_message);    
 
     // 1. Wake up the HP Core
+#ifndef CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE
     ulp_lp_core_wakeup_main_processor();
     mbox_message.hp_wake_count++;
+#endif //  CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE
     k_msleep(1000);
 
     msg.data = &mbox_message;
