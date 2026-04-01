@@ -3,6 +3,7 @@
 #include <zephyr/net/socket.h>
 #include <zephyr/random/random.h>
 #include "shared_data.h"
+#include "lps_wifi.h"
 
 #define BROKER_ADDR CONFIG_LPS_MQTT_BROKER_ADDR 
 #define BROKER_PORT CONFIG_LPS_MQTT_BROKER_PORT
@@ -13,9 +14,6 @@ static uint8_t tx_buffer[128];
 static struct mqtt_client client_ctx;
 static struct sockaddr_in broker;
 static struct zsock_pollfd fds[1];
-
-extern void lps_wifi_prepare_connection(void);
-extern void lps_wifi_teardown_connection(void);
 
 lp_shared_data_t *sensor_data;
 
@@ -64,6 +62,8 @@ static int publish_sensor_data(int16_t temp_c_x10, uint16_t rh_x10)
     // Build a unique Topic string using that same ID
     char topic[64];
     snprintf(topic, sizeof(topic), "sensors/%s/env", device_id);
+    printf("publishing to topic %s\n", topic);
+    
     //snprintf(topic, sizeof(topic), "sensors/greenhouse/env");
     
     struct mqtt_publish_param param;
@@ -110,6 +110,7 @@ static void send_mqtt_update(void)
     printk("Connecting to MQTT broker...\n");
     if (mqtt_connect(&client_ctx) != 0) {
         printk("Failed to connect to broker.\n");
+	lps_wifi_invalidate_dhcp_cache();
         return;
     }
 
