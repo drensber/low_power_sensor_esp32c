@@ -46,6 +46,12 @@ config LPS_MQTT_BROKER_PASSWORD
     help
         "The password to connect to MQTT broker".
 
+config LPS_DHCP_CLIENT
+    bool "LPS DHCP client"
+    default y
+    help
+        "enable LPS DHCP client"
+
 config LPS_IP_ADDR
     string "Static IP Address"
     default "192.168.1.100"

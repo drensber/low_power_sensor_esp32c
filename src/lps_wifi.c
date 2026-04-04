@@ -2,7 +2,6 @@
 #include <zephyr/net/net_ip.h>
 #include <zephyr/net/net_mgmt.h>
 #include <zephyr/net/wifi_mgmt.h>
-#include <zephyr/net/dhcpv4.h>
 #include <esp_attr.h>
 
 static bool wifi_connection_is_alive=false;
@@ -14,7 +13,8 @@ static RTC_DATA_ATTR uint8_t rtc_cached_channel;
 static K_SEM_DEFINE(wifi_connected, 0, 1);
 static struct net_mgmt_event_callback wifi_cb;
 
-#ifdef CONFIG_NET_DHCPV4
+#ifdef CONFIG_LPS_DHCP_CLIENT
+#include "lps_dhcp.h"
 static RTC_DATA_ATTR bool rtc_has_dhcp_lease;
 static RTC_DATA_ATTR struct in_addr rtc_ip_addr;
 static RTC_DATA_ATTR struct in_addr rtc_netmask;
@@ -22,30 +22,9 @@ static RTC_DATA_ATTR struct in_addr rtc_gw;
 static RTC_DATA_ATTR uint32_t rtc_lease_cycles;
 
 #define MAX_LEASE_CYCLES 2000 
-static struct net_mgmt_event_callback dhcp_cb;
+#endif // CONFIG_LPS_DHCP_CLIENT
 
-static void dhcp_handler(struct net_mgmt_event_callback *cb,
-                         uint64_t mgmt_event, struct net_if *iface)
-{
-    if (mgmt_event == NET_EVENT_IPV4_DHCP_BOUND) {
-        printk("DHCP Bound! Harvesting lease...\n");
-
-        rtc_ip_addr = iface->config.ip.ipv4->unicast[0].ipv4.address.in_addr;
-        rtc_netmask = iface->config.ip.ipv4->unicast[0].netmask;
-        rtc_gw = iface->config.ip.ipv4->gw;
-        
-        rtc_has_dhcp_lease = true;
-        rtc_lease_cycles = 0;
-
-        printk("Harvested IP: %d.%d.%d.%d\n", 
-               rtc_ip_addr.s4_addr[0], rtc_ip_addr.s4_addr[1], 
-               rtc_ip_addr.s4_addr[2], rtc_ip_addr.s4_addr[3]);
-
-        k_sem_give(&wifi_connected);
-    }
-}
-#endif
-
+#if !defined(CONFIG_LPS_DHCP_CLIENT)
 static void apply_static_ip_config(void)
 {
     struct net_if *iface = net_if_get_default();
@@ -70,6 +49,7 @@ static void apply_static_ip_config(void)
 
     printk("Static IPv4 configuration applied: %s\n", CONFIG_LPS_IP_ADDR);
 }
+#endif // !defined(CONFIG_LPS_DHCP_CLIENT)
 
 static void initiate_wifi_connection(void)
 {
@@ -129,21 +109,8 @@ static void wifi_mgmt_event_handler(struct net_mgmt_event_callback *cb,
 	    
 	    wifi_connection_is_alive=true;
 
-#ifdef CONFIG_NET_DHCPV4
-
-	    if (rtc_has_dhcp_lease) {
-                printk("Applying cached DHCP lease statically...\n");
-                net_if_ipv4_addr_add(iface, &rtc_ip_addr, NET_ADDR_MANUAL, 0);
-                net_if_ipv4_set_netmask_by_addr(iface, &rtc_ip_addr, &rtc_netmask);
-                net_if_ipv4_set_gw(iface, &rtc_gw);
-                
-                k_sem_give(&wifi_connected); // Instantly ready
-            }	    
-
-#else
-	    apply_static_ip_config();
-            k_sem_give(&wifi_connected);
-#endif
+            // The network routing is completely finished. 
+            k_sem_give(&wifi_connected); 
 
         } else {
             printk("Wi-Fi connection failed with status: %d\n", status->status);
@@ -158,8 +125,7 @@ void lps_wifi_prepare_connection(void)
     if (!wifi_connection_is_alive) {
         struct net_if *iface = net_if_get_default();
 
-#ifdef CONFIG_NET_DHCPV4
-
+#ifdef CONFIG_LPS_DHCP_CLIENT
 	if (rtc_has_dhcp_lease) {
             rtc_lease_cycles++;
             if (rtc_lease_cycles > MAX_LEASE_CYCLES) {
@@ -167,18 +133,6 @@ void lps_wifi_prepare_connection(void)
                 rtc_has_dhcp_lease = false;
             }
         }
-
-        if (rtc_has_dhcp_lease) {
-            printk("Pre-emptively disabling Zephyr auto-DHCP engine...\n");
-            // Setting this offline completely prevents Zephyr from starting DHCP on IF_UP
-            net_dhcpv4_stop(iface); 
-        } else {
-            printk("No valid lease. Arming DHCP listener...\n");
-            net_mgmt_init_event_callback(&dhcp_cb, dhcp_handler, 
-                                         NET_EVENT_IPV4_DHCP_BOUND);
-            net_mgmt_add_event_callback(&dhcp_cb);
-        }
-
 #endif
 
 	// Start listening for the Wi-Fi connection result
@@ -191,7 +145,44 @@ void lps_wifi_prepare_connection(void)
     
 	// Wait up to 20 seconds for the Wi-Fi radio to associate (and DHCP if needed)
 	printk("Waiting for network...\n");
-	if (k_sem_take(&wifi_connected, K_SECONDS(20)) != 0) {
+	if (k_sem_take(&wifi_connected, K_SECONDS(20)) == 0) {
+
+#ifdef CONFIG_LPS_DHCP_CLIENT	    
+	    // Fake Static / Custom DHCP Routing
+	    if (rtc_has_dhcp_lease) {
+		rtc_lease_cycles++;
+		if (rtc_lease_cycles > MAX_LEASE_CYCLES) {
+		    printk("DHCP lease expired. Forcing renewal.\n");
+		    rtc_has_dhcp_lease = false;
+		}
+	    }
+	    
+	    if (!rtc_has_dhcp_lease) {
+		printk("Cache empty. Running Custom Micro DHCP sequence...\n");
+		if (lps_dhcp_run(&rtc_ip_addr, &rtc_netmask, &rtc_gw) == 0) {
+		    printk("DHCP Harvest Success! IP: %d.%d.%d.%d\n",
+			   rtc_ip_addr.s4_addr[0], rtc_ip_addr.s4_addr[1],
+			   rtc_ip_addr.s4_addr[2], rtc_ip_addr.s4_addr[3]);
+		    rtc_has_dhcp_lease = true;
+		    rtc_lease_cycles = 0;
+		} else {
+		    printk("Micro DHCP failed or timed out. Falling back to static...\n");
+		    // Optional: If DHCP fails, you can fall back to the Kconfig strings
+		    // net_addr_pton(AF_INET, CONFIG_LPS_IP_ADDR, &rtc_ip_addr);
+		}
+	    }
+	    
+	    if (rtc_has_dhcp_lease) {
+		printk("Applying cached DHCP lease statically...\n");
+		net_if_ipv4_addr_add(iface, &rtc_ip_addr, NET_ADDR_MANUAL, 0);
+		net_if_ipv4_set_netmask_by_addr(iface, &rtc_ip_addr, &rtc_netmask);
+		net_if_ipv4_set_gw(iface, &rtc_gw);
+	    }
+#else
+	    apply_static_ip_config();
+#endif // CONFIG_LPS_DHCP_CLIENT
+	    
+	} else {
 	    printk("Network timeout. Going back to sleep.\n");
 	}
     }
@@ -210,7 +201,7 @@ void lps_wifi_teardown_connection(void)
 
 void lps_wifi_invalidate_dhcp_cache(void)
 {
-#ifdef CONFIG_NET_DHCPV4
+#ifdef CONFIG_LPS_DHCP_CLIENT
     rtc_has_dhcp_lease = false;
     printk("DHCP cache invalidated.\n");
 #endif
