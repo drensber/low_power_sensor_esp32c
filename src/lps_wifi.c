@@ -171,12 +171,16 @@ void lps_wifi_prepare_connection(void)
 		    // net_addr_pton(AF_INET, CONFIG_LPS_IP_ADDR, &rtc_ip_addr);
 		}
 	    }
-	    
+
 	    if (rtc_has_dhcp_lease) {
 		printk("Applying cached DHCP lease statically...\n");
 		net_if_ipv4_addr_add(iface, &rtc_ip_addr, NET_ADDR_MANUAL, 0);
 		net_if_ipv4_set_netmask_by_addr(iface, &rtc_ip_addr, &rtc_netmask);
 		net_if_ipv4_set_gw(iface, &rtc_gw);
+		
+		// Give the AP data path 250ms to open, and let Zephyr's 
+		// background Gratuitous ARP propagate through the network switches.
+		k_msleep(250); 
 	    }
 #else
 	    apply_static_ip_config();
