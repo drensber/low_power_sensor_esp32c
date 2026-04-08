@@ -120,7 +120,7 @@ static void wifi_mgmt_event_handler(struct net_mgmt_event_callback *cb,
     }
 }
 
-void lps_wifi_prepare_connection(void)
+bool lps_wifi_prepare_connection(void)
 {
     if (!wifi_connection_is_alive) {
         struct net_if *iface = net_if_get_default();
@@ -188,8 +188,10 @@ void lps_wifi_prepare_connection(void)
 	    
 	} else {
 	    printk("Network timeout. Going back to sleep.\n");
+	    rtc_has_cached_ap = false;
 	}
     }
+    return wifi_connection_is_alive;
 }
 
 void lps_wifi_teardown_connection(void)

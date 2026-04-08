@@ -57,7 +57,7 @@ static void get_device_id(char *id_buffer, size_t buffer_size)
     }
 }
 
-static int publish_sensor_data(int32_t seq, int16_t temp_c_x10, uint16_t rh_x10)
+static int publish_sensor_data(int32_t seq, int16_t temp_c_x10, uint16_t rh_x10, uint16_t msg_id, uint8_t is_dup)
 {
     char payload[128];
     char device_id[20];
@@ -82,8 +82,10 @@ static int publish_sensor_data(int32_t seq, int16_t temp_c_x10, uint16_t rh_x10)
     param.message.topic.topic.size = strlen(topic);
     param.message.payload.data = payload;
     param.message.payload.len = strlen(payload);
-    param.message_id = sys_rand32_get();
-    param.dup_flag = 0;
+
+    // Use the stable ID and set the Duplicate flag
+    param.message_id = msg_id;
+    param.dup_flag = is_dup;
     param.retain_flag = 0;
 
     return mqtt_publish(&client_ctx, &param);
@@ -93,12 +95,21 @@ static void send_mqtt_update(void)
 {
     static struct mqtt_utf8 password;
     static struct mqtt_utf8 username;
-    int err = -1;
+    bool successful_publish = false;
 
-    // 2-Attempt Loop. If the first fails, the ARP hole is 
-    // usually fixed by the OS in the background. The second will succeed.
-    for (int attempts = 0; attempts < 2; attempts++) {
+    // Generate a single 16-bit Message ID for this entire wake cycle
+    uint16_t current_msg_id = sys_rand32_get() & 0xFFFF;
+    
+    // Master Session Loop. 
+    // If ANY step of the MQTT flow fails, we tear down the TCP socket, 
+    // wait for the RF environment to settle, and rebuild from scratch.
+    for (int session = 0; session < 2; session++) {
         
+        if (session > 0) {
+            printk("\n--- Initiating Costly Recovery (Session Attempt %d/2) ---\n", session + 1);
+            k_msleep(1000); // 1-second physical delay to let Router/RF clear
+        }
+
         mqtt_client_init(&client_ctx);
         k_sem_reset(&mqtt_conn_sem);
         k_sem_reset(&mqtt_pub_sem);
@@ -124,76 +135,99 @@ static void send_mqtt_update(void)
         client_ctx.tx_buf_size = sizeof(tx_buffer);
         client_ctx.transport.type = MQTT_TRANSPORT_NON_SECURE;
 
-        printk("Connecting to MQTT broker (Attempt %d/2)...\n", attempts + 1);
-        err = mqtt_connect(&client_ctx);
+        // INNER LOOP: specifically mitigates the -22 EINVAL local OS race condition
+        int err = -1;
+        for (int attempts = 0; attempts < 3; attempts++) {
+            printk("Connecting to MQTT broker (Attempt %d/3)...\n", attempts + 1);
+            err = mqtt_connect(&client_ctx);
+            
+            if (err == 0) {
+                break; 
+            }
+
+            printk("Connection failed: %d. Backing off...\n", err);
+            k_msleep(500); // 500ms guarantees Zephyr's internal IPv4 tables are up
+        }
+
+        if (err != 0) {
+            printk("Session %d: Failed to connect.\n", session + 1);
+            continue; // Trigger the Master Recovery Loop
+        }
+
+        fds[0].fd = client_ctx.transport.tcp.sock;
+        fds[0].events = ZSOCK_POLLIN;
         
-        if (err == 0) {
-            break; // Success! Break out of the retry loop.
+        // Wait for connection ACK
+        bool connected = false;
+        for (int i = 0; i < 50; i++) { 
+            if (zsock_poll(fds, 1, 100) > 0) {
+                mqtt_input(&client_ctx);
+            }
+            if (k_sem_take(&mqtt_conn_sem, K_NO_WAIT) == 0) {
+                connected = true;
+                break;
+            }
         }
 
-        printk("Connection failed: %d. Letting ARP settle before retry...\n", err);
-        // Give the router an extra 200ms to finish processing Zephyr's 
-        // background ARP reply before we fire the second TCP SYN.
-        k_msleep(200); 
+        if (!connected) {
+            printk("Session %d: Timeout waiting for CONNACK.\n", session + 1);
+            mqtt_disconnect(&client_ctx, NULL); // Safely close the orphaned socket
+            continue; // Trigger the Master Recovery Loop
+        }
+
+        printk("Publishing data...\n");
+
+	uint8_t is_dup = (session > 0) ? 1 : 0;
+	
+        if (publish_sensor_data(sensor_data->hp_wake_count, sensor_data->temp_c_x10, sensor_data->rh_x10, current_msg_id, is_dup) != 0) {
+            printk("Session %d: Failed to enqueue publish.\n", session + 1);
+            mqtt_disconnect(&client_ctx, NULL);
+            continue; 
+        }
+
+        // Wait for publish ACK
+        bool published = false;
+        for (int i = 0; i < 50; i++) { 
+            if (zsock_poll(fds, 1, 100) > 0) {
+                mqtt_input(&client_ctx);
+            }
+            if (k_sem_take(&mqtt_pub_sem, K_NO_WAIT) == 0) {
+                published = true;
+                break;
+            }
+        }
+
+        if (!published) {
+            printk("Session %d: Timed out waiting for PUBACK. Network loss suspected.\n", session + 1);
+            mqtt_disconnect(&client_ctx, NULL);
+            continue; // Trigger the Master Recovery Loop!
+        }
+
+        // If we reach here, the packet is cryptographically verified on the broker.
+        successful_publish = true;
+        mqtt_disconnect(&client_ctx, NULL);
+        break; // Break completely out of the Master Session loop
     }
 
-    // If we exhausted both attempts, the network is truly unreachable.
-    if (err != 0) {
-        printk("Fatal: Failed to connect after retries. Invalidating cache.\n");
+    // Only if BOTH sessions completely failed do we drop the nuclear bomb
+    if (!successful_publish) {
+        printk("Fatal: Exhausted all recovery attempts. Invalidating cache.\n");
         lps_wifi_invalidate_dhcp_cache();
-        return;
     }
-
-    fds[0].fd = client_ctx.transport.tcp.sock;
-    fds[0].events = ZSOCK_POLLIN;
-    
-    // Wait for connection ACK
-    bool connected = false;
-    for (int i = 0; i < 50; i++) { 
-        if (zsock_poll(fds, 1, 100) > 0) {
-            mqtt_input(&client_ctx);
-        }
-        if (k_sem_take(&mqtt_conn_sem, K_NO_WAIT) == 0) {
-            connected = true;
-            break;
-        }
-    }
-
-    if (!connected) {
-        printk("Timeout waiting for CONNACK. Invalidating cache.\n");
-        lps_wifi_invalidate_dhcp_cache();
-        return;
-    }
-
-    printk("Publishing data...\n");
-    if (publish_sensor_data(sensor_data->hp_wake_count, sensor_data->temp_c_x10, sensor_data->rh_x10) != 0) {
-        printk("Failed to enqueue publish.\n");
-        return;
-    }
-
-    // Wait for publish ACK
-    bool published = false;
-    for (int i = 0; i < 50; i++) { 
-        if (zsock_poll(fds, 1, 100) > 0) {
-            mqtt_input(&client_ctx);
-        }
-        if (k_sem_take(&mqtt_pub_sem, K_NO_WAIT) == 0) {
-            published = true;
-            break;
-        }
-    }
-
-    if (!published) {
-        printk("Warning: Timed out waiting for PUBACK. Network loss suspected.\n");
-    }
-
-    mqtt_disconnect(&client_ctx, NULL);
 }
 
 void lps_send_update(lp_shared_data_t *data) {
     sensor_data = data;
-    lps_wifi_prepare_connection();
-    send_mqtt_update();
+    
+    if (lps_wifi_prepare_connection()) {
+        // Wi-Fi and IP routing are physically verified. Safe to run.
+        send_mqtt_update();
+    } else {
+        // Wi-Fi failed. Skip MQTT, invalidate caches, and tear down immediately.
+        printk("Skipping MQTT publish due to Wi-Fi failure.\n");
+        lps_wifi_invalidate_dhcp_cache();
+    }
+    
     lps_wifi_teardown_connection();
     k_msleep(50); 
 }

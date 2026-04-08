@@ -1,12 +1,14 @@
 #ifndef LPS_WIFI_H
 #define LPS_WIFI_H
 
+#include <stdbool.h>
+
 /**
  * @brief Wakes the Wi-Fi radio and establishes a connection to the AP.
  * Applies either a cached "Fake Static" DHCP lease or initiates 
  * a full DHCP DORA sequence if the cache is empty/invalid.
  */
-void lps_wifi_prepare_connection(void);
+bool lps_wifi_prepare_connection(void);
 
 /**
  * @brief Gracefully tears down the Wi-Fi connection.
