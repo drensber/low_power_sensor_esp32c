@@ -3,6 +3,8 @@
 
 cmake_minimum_required(VERSION 3.20.0)
 
+list(APPEND EXTRA_CONF_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../lp_hp_shared.conf")
+
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 
 message(STATUS "${BOARD} compiles as lpcore_image in this build")

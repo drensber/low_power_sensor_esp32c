@@ -143,9 +143,9 @@ bool lps_wifi_prepare_connection(void)
 	// Tell the radio to turn on and connect using your Kconfig credentials
 	initiate_wifi_connection();
     
-	// Wait up to 20 seconds for the Wi-Fi radio to associate (and DHCP if needed)
+	// Wait for the Wi-Fi radio to associate
 	printk("Waiting for network...\n");
-	if (k_sem_take(&wifi_connected, K_SECONDS(20)) == 0) {
+	if (k_sem_take(&wifi_connected, K_SECONDS(10)) == 0) {
 
 #ifdef CONFIG_LPS_DHCP_CLIENT	    
 	    // Fake Static / Custom DHCP Routing

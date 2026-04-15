@@ -14,7 +14,7 @@ static struct mqtt_client client_ctx;
 static struct sockaddr_in broker;
 static struct zsock_pollfd fds[1];
 
-lp_shared_data_t *sensor_data;
+lp_to_hp_shared_data_t *sensor_data;
 
 // Event notification semaphores
 static K_SEM_DEFINE(mqtt_conn_sem, 0, 1);
@@ -91,7 +91,7 @@ static int publish_sensor_data(int32_t seq, int16_t temp_c_x10, uint16_t rh_x10,
     return mqtt_publish(&client_ctx, &param);
 }
 
-static void send_mqtt_update(void)
+static bool send_mqtt_update(void)
 {
     static struct mqtt_utf8 password;
     static struct mqtt_utf8 username;
@@ -214,14 +214,17 @@ static void send_mqtt_update(void)
         printk("Fatal: Exhausted all recovery attempts. Invalidating cache.\n");
         lps_wifi_invalidate_dhcp_cache();
     }
+
+    return successful_publish;
 }
 
-void lps_send_update(lp_shared_data_t *data) {
+bool lps_send_update(lp_to_hp_shared_data_t *data) {
     sensor_data = data;
+    bool successful_publish = false;
     
     if (lps_wifi_prepare_connection()) {
         // Wi-Fi and IP routing are physically verified. Safe to run.
-        send_mqtt_update();
+        successful_publish = send_mqtt_update();
     } else {
         // Wi-Fi failed. Skip MQTT, invalidate caches, and tear down immediately.
         printk("Skipping MQTT publish due to Wi-Fi failure.\n");
@@ -229,5 +232,8 @@ void lps_send_update(lp_shared_data_t *data) {
     }
     
     lps_wifi_teardown_connection();
-    k_msleep(50); 
+
+    k_msleep(50);
+
+    return successful_publish;
 }

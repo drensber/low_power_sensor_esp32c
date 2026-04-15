@@ -19,7 +19,7 @@
 
 #include "shared_data.h"
 
-extern void lps_send_update(lp_shared_data_t *);
+extern bool lps_send_update(lp_to_hp_shared_data_t *);
 
 #ifdef CONFIG_LPS_EXPLICIT_LP_IMAGE_LOADING    
 extern const uint8_t ulp_lp_core_app_start[];
@@ -30,20 +30,26 @@ static RTC_DATA_ATTR uint32_t hp_wake_count = 0;
 static RTC_DATA_ATTR uint32_t callback_count = 0;
 static RTC_DATA_ATTR bool first_boot=true;
 
-const struct mbox_dt_spec rx_channel = MBOX_DT_SPEC_GET(DT_PATH(mbox_consumer), rx);
-static lp_shared_data_t g_mbox_received_data;
+const struct mbox_dt_spec rx_channel =
+    MBOX_DT_SPEC_GET(DT_PATH(mbox_consumer), rx);
+static lp_to_hp_shared_data_t g_mbox_received_data;
 static mbox_channel_id_t g_mbox_received_channel;
 
 static volatile bool mbox_message_received = false;
 
 
-static void callback(const struct device *dev, mbox_channel_id_t channel_id, void *user_data,
+static void callback(const struct device *dev,
+		     mbox_channel_id_t channel_id,
+		     void *user_data,
 		     struct mbox_msg *data)
 {
-    printk("calling callback(channel_id=%d, user_data=%x, data=%x\n", (uint32_t) channel_id, (uint32_t)user_data, (uint32_t)data);
-    printk("                 data->size=%d, data->data=%x\n", (uint32_t)data->size, (uint32_t)data->data);
+    printk("calling callback(channel_id=%d, user_data=%x, data=%x\n",
+	   (uint32_t) channel_id, (uint32_t)user_data, (uint32_t)data);
+    printk("                 data->size=%d, data->data=%x\n",
+	   (uint32_t)data->size, (uint32_t)data->data);
     if (callback_count++ > 0) {
-	memcpy(&g_mbox_received_data, data->data, sizeof(lp_shared_data_t));
+	memcpy(&g_mbox_received_data, data->data,
+	       sizeof(lp_to_hp_shared_data_t));
 
 	g_mbox_received_channel = channel_id;
     
@@ -55,13 +61,17 @@ static void callback(const struct device *dev, mbox_channel_id_t channel_id, voi
 int main(void)
 {
     uint32_t cause;
-#if defined(CONFIG_LPS_USE_LIGHT_SLEEP) || defined(CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE)
+    bool successful_publish;
+    
+#if defined(CONFIG_LPS_USE_LIGHT_SLEEP) \
+    || defined(CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE)
     while (1) {
 #endif
     // 1. Check wakeup cause
     hwinfo_get_reset_cause(&cause);
 
-#if !(defined(CONFIG_LPS_USE_LIGHT_SLEEP) || defined(CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE))    
+#if !(defined(CONFIG_LPS_USE_LIGHT_SLEEP) \
+      || defined(CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE))    
     if (cause & RESET_LOW_POWER_WAKE || hp_wake_count == 0) {
 #else
     if (true) {
@@ -105,7 +115,9 @@ int main(void)
 	
 	mbox_message_received = false;
 
-	lps_send_update(&g_mbox_received_data);
+	successful_publish = lps_send_update(&g_mbox_received_data);
+
+	printk("successful_publish = %s\n", successful_publish ? "true" : "false");
 	
         k_msleep(50); // Allow logs to flush
     }
@@ -117,7 +129,8 @@ int main(void)
         printk("   Loading LP firmware... ");
 
         /* Load LP firmware into RTC RAM */
-        ulp_lp_core_load_binary(ulp_lp_core_app_start, (ulp_lp_core_app_end - ulp_lp_core_app_start));
+        ulp_lp_core_load_binary(ulp_lp_core_app_start,
+				(ulp_lp_core_app_end - ulp_lp_core_app_start));
 
 	ulp_lp_core_cfg_t cfg = {
             .wakeup_source = ULP_LP_CORE_WAKEUP_SOURCE_HP_CPU,
@@ -152,7 +165,8 @@ int main(void)
 #endif // CONFIG_LPS_USE_LIGHT_SLEEP
 #endif // CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE
 
-#if defined(CONFIG_LPS_USE_LIGHT_SLEEP) || defined(CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE)    
+#if defined(CONFIG_LPS_USE_LIGHT_SLEEP) \
+    || defined(CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE)    
     } // while (1) infinite loop
 #endif    
 

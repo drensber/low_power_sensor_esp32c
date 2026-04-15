@@ -71,7 +71,7 @@ static uint8_t i2c_read_byte(int ack) {
 }
 
 // --- 3. The AHT20 Sensor Routine ---
-void read_aht20(lp_shared_data_t *return_data) {
+void read_aht20(lp_to_hp_shared_data_t *return_data) {
     // Init pins as inputs (pulled high by external resistors)
     ulp_lp_core_gpio_init(SCL_PIN);
     ulp_lp_core_gpio_init(SDA_PIN);

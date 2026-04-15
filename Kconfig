@@ -3,6 +3,7 @@ module-str = Low Power Sensor
 module-help = Low Power Sensor app
 
 source "Kconfig.zephyr"
+rsource "Kconfig.lp_hp_shared"
 
 config LPS_EXPLICIT_LP_IMAGE_LOADING
     bool "Load the LP image based on directives within the application"
@@ -15,12 +16,6 @@ config LPS_USE_LIGHT_SLEEP
     default n
     help
         "enable HP core light sleep mode"
-
-config LPS_HPCORE_ALWAYS_STAY_AWAKE
-    bool "Don't put the HP core to sleep (for debugging)"
-    default n
-    help
-        "enable HP core don't sleep"
 
 config LPS_MQTT_BROKER_ADDR
     string "MQTT broker address"

@@ -3,6 +3,8 @@
 
 cmake_minimum_required(VERSION 3.20.0)
 
+list(APPEND EXTRA_CONF_FILE "${CMAKE_CURRENT_SOURCE_DIR}/lp_hp_shared.conf")
+
 set(REMOTE_ZEPHYR_DIR ${CMAKE_CURRENT_BINARY_DIR}/../low_power_sensor_lpcore/zephyr)
 set(LP_FULL_BIN ${CMAKE_BINARY_DIR}/../low_power_sensor_lpcore/zephyr/zephyr.bin)
 set(LP_STRIPPED_BIN ${CMAKE_BINARY_DIR}/../low_power_sensor_lpcore/zephyr/zephyr_stripped.bin)

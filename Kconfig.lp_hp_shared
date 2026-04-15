@@ -1,0 +1,24 @@
+config LPS_HPCORE_ALWAYS_STAY_AWAKE
+    bool "Don't put the HP core to sleep (for debugging)"
+    default n
+    help
+        "enable HP core don't sleep"
+
+config LPS_TEMP_CHANGE_PUBLISH_THRESHOLD
+    int "LPS temperature change publish threshold"
+    default 5
+    help
+        "LPS temp change publish threshold (10ths of degree C)"
+
+config LPS_HUM_CHANGE_PUBLISH_THRESHOLD
+    int "LPS humidity change publish threshold"
+    default 10
+    help
+        "LPS relative humidity change publish threshold (10ths of %)"
+
+config LPS_MAXIMUM_TIME_BETWEEN_PUBLISH_SECONDS
+    int "LPS max time between updates"
+    default 600
+    help
+        "LPS maximum seconds between published updates"
+
