@@ -6,13 +6,13 @@ config LPS_HPCORE_ALWAYS_STAY_AWAKE
 
 config LPS_TEMP_CHANGE_PUBLISH_THRESHOLD
     int "LPS temperature change publish threshold"
-    default 5
+    default 2
     help
         "LPS temp change publish threshold (10ths of degree C)"
 
 config LPS_HUM_CHANGE_PUBLISH_THRESHOLD
     int "LPS humidity change publish threshold"
-    default 10
+    default 5
     help
         "LPS relative humidity change publish threshold (10ths of %)"
 
