@@ -1,7 +1,7 @@
 /*
  * main() routine for the low power core image.
  * 
- * Copyright (c) 2025 Dave Rensberger
+ * Copyright (c) 2026 Dave Rensberger
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -28,6 +28,9 @@ static RTC_DATA_ATTR int16_t most_recent_published_temp = -100;
 static RTC_DATA_ATTR uint16_t most_recent_published_hum;
 static RTC_DATA_ATTR uint16_t wakeups_since_last_publish;
 
+static RTC_DATA_ATTR volatile publish_status_t hp_publish_status = PUBLISH_STATUS_PENDING; 
+static RTC_DATA_ATTR bool waiting_for_ack = false;
+
 const struct mbox_dt_spec tx_channel = MBOX_DT_SPEC_GET(DT_PATH(mbox_consumer), tx);
 
 int main(void)
@@ -49,7 +52,29 @@ int main(void)
 
     read_aht20(&mbox_message);    
 
-    // 1. Wake up the HP Core
+
+
+    if (waiting_for_ack) {
+        if (hp_publish_status == PUBLISH_STATUS_SUCCESS) {
+            printf("Previous publish SUCCEEDED.\n");
+            waiting_for_ack = false;
+            
+            // Safe to reset thresholds now!
+            wakeups_since_last_publish = 0;
+            most_recent_published_hum = mbox_message.rh_x10;
+            most_recent_published_temp = mbox_message.temp_c_x10;
+            
+        } else if (hp_publish_status == PUBLISH_STATUS_FAILURE) {
+            printf("Previous publish FAILED. Thresholds intact. Retrying.\n");
+            waiting_for_ack = false;
+            
+        } else {
+            // Still 0. The HP core must be taking a very long time to connect, 
+            // or it crashed. We will wait one more cycle.
+            printf("Publish still pending...\n");
+        }
+    }    
+
 #ifndef CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE
     bool time_threshold_exceeded=true;
     bool temperature_threshold_exceeded=true;
@@ -89,37 +114,45 @@ int main(void)
     if (time_threshold_exceeded ||
 	temperature_threshold_exceeded ||
 	humidity_threshold_exceeded) {
-	
-	ulp_lp_core_wakeup_main_processor();
-	mbox_message.hp_wake_count++;
 
-	// Give HP core time to boot to the point where it can recieve mbox messages
-	k_msleep(1000);
-	
-	msg.data = &mbox_message;
-	msg.size = mbox_message_size;
-	
-	printf("Calling mbox_send with:\n"
-	       "  .lp_wake_count=%d\n"
-	       "  .hp_wake_count=%d\n"
-	       "  .temp_c_x10=%d\n"
-	       "  .rh_x10=%d\n",
-	       ((lp_to_hp_shared_data_t *) msg.data)->lp_wake_count,
-	       ((lp_to_hp_shared_data_t *) msg.data)->hp_wake_count,	   
-	       ((lp_to_hp_shared_data_t *) msg.data)->temp_c_x10,
-	       ((lp_to_hp_shared_data_t *) msg.data)->rh_x10);
-	
-	if (mbox_send_dt(&tx_channel, &msg) < 0) {
-	    printf("mbox_send() error\n");
-	}
-	
-	k_msleep(100);
+        if (!waiting_for_ack) {
+            printf("Threshold met. Waking HP core.\n");
+            
+            // Give the HP core the return address for the receipt
+            mbox_message.most_recent_publish_status_p = &hp_publish_status;
+            hp_publish_status = PUBLISH_STATUS_PENDING; // Reset to pending
+            waiting_for_ack = true;
+           	
+	    ulp_lp_core_wakeup_main_processor();
+	    mbox_message.hp_wake_count++;
 
+	    // Give HP core time to boot to the point where it can recieve mbox messages
+	    k_msleep(1000);
 	
-	// TODO: really needs to wait for mbox acknowledgement from HP core that it succeeded.
-	wakeups_since_last_publish = 0;
-	most_recent_published_hum = mbox_message.rh_x10;
-	most_recent_published_temp = mbox_message.temp_c_x10;
+	    msg.data = &mbox_message;
+	    msg.size = mbox_message_size;
+	
+	    printf("Calling mbox_send with:\n"
+		   "  .lp_wake_count=%d\n"
+		   "  .hp_wake_count=%d\n"
+		   "  .temp_c_x10=%d\n"
+		   "  .rh_x10=%d\n"
+		   "  .most_recent_publish_status_p=0x%x\n",
+		   ((lp_to_hp_shared_data_t *) msg.data)->lp_wake_count,
+		   ((lp_to_hp_shared_data_t *) msg.data)->hp_wake_count,	   
+		   ((lp_to_hp_shared_data_t *) msg.data)->temp_c_x10,
+		   ((lp_to_hp_shared_data_t *) msg.data)->rh_x10,
+		   (uint32_t)((lp_to_hp_shared_data_t *) msg.data)->most_recent_publish_status_p);
+	
+	    if (mbox_send_dt(&tx_channel, &msg) < 0) {
+		printf("mbox_send() error\n");
+	    }
+	
+	    k_msleep(100);
+	} else {
+            printf("Skipping HP wake. Actively waiting for network receipt.\n");
+            wakeups_since_last_publish++;
+        }	
     }
     else {
 	wakeups_since_last_publish++;

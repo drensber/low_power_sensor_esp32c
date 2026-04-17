@@ -118,6 +118,14 @@ int main(void)
 	successful_publish = lps_send_update(&g_mbox_received_data);
 
 	printk("successful_publish = %s\n", successful_publish ? "true" : "false");
+
+	// Write the receipt directly to the LP core's RTC memory!
+	if (g_mbox_received_data.most_recent_publish_status_p != NULL) {
+	    *(g_mbox_received_data.most_recent_publish_status_p) =
+		successful_publish ? PUBLISH_STATUS_SUCCESS : PUBLISH_STATUS_FAILURE;
+	    printk("Wrote receipt %d to LP core.\n",
+		*(g_mbox_received_data.most_recent_publish_status_p));
+	}
 	
         k_msleep(50); // Allow logs to flush
     }
