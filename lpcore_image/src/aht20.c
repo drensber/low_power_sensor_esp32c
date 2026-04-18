@@ -1,7 +1,9 @@
 #define AHT20_I2C_ADDR 0x38
 #include <zephyr/kernel.h>
+#include <zephyr/logging/log.h>
 #include "shared_data.h"
 
+LOG_MODULE_DECLARE(lps_lp, CONFIG_LPS_LOG_LEVEL);
 
 #if 1
 // The lp_i2c API isn't supported yet for the esp32c6.
@@ -88,7 +90,7 @@ void read_aht20(lp_to_hp_shared_data_t *return_data) {
     // Trigger Measurement
     i2c_start();
     if (i2c_write_byte(AHT20_ADDR << 1) != 0) {
-	printf("i2c write error 1\n");
+	LOG_DBG("i2c write error 1");
 	return; // Write Addr (NACKed)
     }
     i2c_write_byte(0xAC);
@@ -101,7 +103,7 @@ void read_aht20(lp_to_hp_shared_data_t *return_data) {
     // Read Data
     i2c_start();
     if (i2c_write_byte((AHT20_ADDR << 1) | 1) != 0) {
-	printf("i2c write error 2\n");
+	LOG_DBG("i2c write error 2");
 	return; // Read Addr
     }
     
@@ -113,7 +115,7 @@ void read_aht20(lp_to_hp_shared_data_t *return_data) {
     i2c_stop();
 
     if ((data[0] & 0x80) != 0) {
-	printf("i2c sensor busy\n");
+	LOG_DBG("i2c sensor busy");
 	return; // Sensor busy
     }
     

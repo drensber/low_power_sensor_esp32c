@@ -6,7 +6,10 @@
 #include <zephyr/random/random.h>
 #include <string.h>
 #include <errno.h>
+#include <zephyr/logging/log.h>
 #include "lps_dhcp.h"
+
+LOG_MODULE_DECLARE(lps_hp, CONFIG_LPS_LOG_LEVEL);
 
 #define DHCP_CLIENT_PORT 68
 #define DHCP_SERVER_PORT 67
@@ -137,19 +140,19 @@ int lps_dhcp_run(struct in_addr *ip,
     
     if (ip->s_addr != 0) {
         dummy_ip.s_addr = ip->s_addr;
-        printk("Listening for Unicast replies on expired IP...\n");
+        LOG_DBG("Listening for Unicast replies on expired IP...");
     } else {
         net_addr_pton(AF_INET, "169.254.1.1", &dummy_ip);
-        printk("Listening for Broadcast replies on dummy IP...\n");
+        LOG_DBG("Listening for Broadcast replies on dummy IP...");
     }
     
     net_if_ipv4_addr_add(iface, &dummy_ip, NET_ADDR_MANUAL, 0);
     net_if_ipv4_set_netmask_by_addr(iface, &dummy_ip, &dummy_mask);
 
-    printk("Opening UDP socket...\n");
+    LOG_DBG("Opening UDP socket...");
     sock = zsock_socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (sock < 0) {
-        printk("DHCP ERROR: zsock_socket failed. errno: %d\n", errno);
+        LOG_DBG("DHCP ERROR: zsock_socket failed. errno: %d", errno);
         goto cleanup;
     }
 
@@ -158,11 +161,11 @@ int lps_dhcp_run(struct in_addr *ip,
     bind_addr.sin_port = htons(DHCP_CLIENT_PORT);
     bind_addr.sin_addr.s_addr = INADDR_ANY; 
     
-    printk("Binding socket to port 68...\n");
+    LOG_DBG("Binding socket to port 68...");
     if (zsock_bind(sock,
 		   (struct sockaddr *)&bind_addr,
 		   sizeof(bind_addr)) < 0) {
-        printk("DHCP ERROR: zsock_bind failed. errno: %d\n", errno);
+        LOG_DBG("DHCP ERROR: zsock_bind failed. errno: %d", errno);
         goto cleanup;
     }
 
@@ -212,24 +215,24 @@ int lps_dhcp_run(struct in_addr *ip,
     *opt++ = OPT_ROUTER; 
     *opt++ = OPT_END;
 
-    printk("Executing Direct Hardware Handoff (DISCOVER)...\n");
+    LOG_DBG("Executing Direct Hardware Handoff (DISCOVER)...");
     if (push_raw_frame(iface, &tx_pkt) < 0) {
-        printk("DHCP ERROR: push_raw_frame failed.\n");
+        LOG_DBG("DHCP ERROR: push_raw_frame failed.");
         goto cleanup;
     }
 
     // Wait for offer
     bool offer_received = false;
-    printk("Waiting up to %dms for DHCP OFFER...\n", DHCP_TIMEOUT_MS);
+    LOG_DBG("Waiting up to %dms for DHCP OFFER...", DHCP_TIMEOUT_MS);
     while (!offer_received) {
 	 // Wait strictly for DHCP_TIMEOUT_MS ms
         int poll_res = zsock_poll(&poll_fd, 1, DHCP_TIMEOUT_MS);
         
         if (poll_res == 0) {
-            printk("DHCP WARNING: Poll timeout waiting for OFFER.\n");
+            LOG_DBG("DHCP WARNING: Poll timeout waiting for OFFER.");
             goto cleanup;
         } else if (poll_res < 0) {
-            printk("DHCP ERROR: zsock_poll failed. errno: %d\n", errno);
+            LOG_DBG("DHCP ERROR: zsock_poll failed. errno: %d", errno);
             goto cleanup;
         }
 
@@ -278,19 +281,19 @@ int lps_dhcp_run(struct in_addr *ip,
     tx_pkt.ip.csum = calc_ip_csum((uint8_t *)&tx_pkt.ip,
 				  sizeof(struct ip_hdr));
 
-    printk("Executing Direct Hardware Handoff (REQUEST)...\n");
+    LOG_DBG("Executing Direct Hardware Handoff (REQUEST)...");
     if (push_raw_frame(iface, &tx_pkt) < 0) {
-        printk("DHCP ERROR: push_raw_frame (REQUEST) failed.\n");
+        LOG_DBG("DHCP ERROR: push_raw_frame (REQUEST) failed.");
         goto cleanup;
     }
 
     // Wait for ACK
-    printk("Waiting for DHCP ACK...\n");
+    LOG_DBG("Waiting for DHCP ACK...");
     while (1) {
         int poll_res = zsock_poll(&poll_fd, 1, 3000); 
         
         if (poll_res <= 0) {
-            printk("DHCP WARNING: Poll timeout/error waiting for ACK.\n");
+            LOG_DBG("DHCP WARNING: Poll timeout/error waiting for ACK.");
             goto cleanup;
         }
 

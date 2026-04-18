@@ -22,3 +22,14 @@ config LPS_MAXIMUM_TIME_BETWEEN_PUBLISH_SECONDS
     help
         "LPS maximum seconds between published updates"
 
+config LPS_LOG_LEVEL
+    int "LPS Log Level"
+    default 0
+    help
+      Sets the log level for the Low Power Sensor modules.
+      0 = OFF
+      1 = ERROR
+      2 = WARNING
+      3 = INFO
+      4 = DEBUG
+      

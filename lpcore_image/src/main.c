@@ -9,15 +9,18 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <zephyr/kernel.h>
+#include <zephyr/drivers/mbox.h>
+#include <zephyr/logging/log.h>
 #include "ulp_lp_core.h"
 #include "ulp_lp_core_utils.h"
 #include "ulp_lp_core_memory_shared.h"
 #include "ulp_lp_core_lp_timer_shared.h"
 #include "esp_attr.h"
-#include <zephyr/kernel.h>
-#include <zephyr/drivers/mbox.h>
 
 #include "shared_data.h"
+
+LOG_MODULE_REGISTER(lps_lp, CONFIG_LPS_LOG_LEVEL);
 
 extern void read_aht20(lp_to_hp_shared_data_t *);
 
@@ -42,11 +45,11 @@ int main(void)
     int mbox_message_size = sizeof(mbox_message);
     
     if (mbox_message_size > max_transfer_size_bytes) {
-	printf("Size of mbox_message is %d bytes (max is %d)\n",
+	LOG_DBG("Size of mbox_message is %d bytes (max is %d)",
 	       mbox_message_size, max_transfer_size_bytes);
     }
     
-    printf("LP core loop %d\n", mbox_message.lp_wake_count);
+    LOG_DBG("LP core loop %d", mbox_message.lp_wake_count);
 
     mbox_message.lp_wake_count++;
 
@@ -56,7 +59,7 @@ int main(void)
 
     if (waiting_for_ack) {
         if (hp_publish_status == PUBLISH_STATUS_SUCCESS) {
-            printf("Previous publish SUCCEEDED.\n");
+            LOG_DBG("Previous publish SUCCEEDED.");
             waiting_for_ack = false;
             
             // Safe to reset thresholds now!
@@ -65,13 +68,13 @@ int main(void)
             most_recent_published_temp = mbox_message.temp_c_x10;
             
         } else if (hp_publish_status == PUBLISH_STATUS_FAILURE) {
-            printf("Previous publish FAILED. Thresholds intact. Retrying.\n");
+            LOG_DBG("Previous publish FAILED. Thresholds intact. Retrying.");
             waiting_for_ack = false;
             
         } else {
             // Still 0. The HP core must be taking a very long time to connect, 
             // or it crashed. We will wait one more cycle.
-            printf("Publish still pending...\n");
+            LOG_DBG("Publish still pending...");
         }
     }    
 
@@ -84,7 +87,7 @@ int main(void)
     && CONFIG_LPS_MAXIMUM_TIME_BETWEEN_PUBLISH_SECONDS != 0
     uint32_t seconds_since_last_publish =
 	(wakeups_since_last_publish * (cfg->sleep_duration_us/1000000));
-    printf("seconds_since_last_publish = %d\n", seconds_since_last_publish);
+    LOG_DBG("seconds_since_last_publish = %d", seconds_since_last_publish);
     
     if (seconds_since_last_publish < CONFIG_LPS_MAXIMUM_TIME_BETWEEN_PUBLISH_SECONDS) {
 	time_threshold_exceeded=false;
@@ -93,7 +96,7 @@ int main(void)
 
 #if defined(CONFIG_LPS_TEMP_CHANGE_PUBLISH_THRESHOLD) \
     && CONFIG_LPS_TEMP_CHANGE_PUBLISH_THRESHOLD != 0
-    printf("temperature change is %d\n",
+    LOG_DBG("temperature change is %d",
 	   abs(mbox_message.temp_c_x10 - most_recent_published_temp));
     if (abs(mbox_message.temp_c_x10 - most_recent_published_temp) <
 	CONFIG_LPS_TEMP_CHANGE_PUBLISH_THRESHOLD) {
@@ -103,7 +106,7 @@ int main(void)
 
 #if defined(CONFIG_LPS_HUM_CHANGE_PUBLISH_THRESHOLD) \
     && CONFIG_LPS_HUM_CHANGE_PUBLISH_THRESHOLD != 0
-    printf("humidity change is %d\n",
+    LOG_DBG("humidity change is %d",
 	   abs(mbox_message.rh_x10 - most_recent_published_hum));
     if (abs(mbox_message.rh_x10 - most_recent_published_hum) <
 	CONFIG_LPS_HUM_CHANGE_PUBLISH_THRESHOLD) {
@@ -116,7 +119,7 @@ int main(void)
 	humidity_threshold_exceeded) {
 
         if (!waiting_for_ack) {
-            printf("Threshold met. Waking HP core.\n");
+            LOG_DBG("Threshold met. Waking HP core.");
             
             // Give the HP core the return address for the receipt
             mbox_message.most_recent_publish_status_p = &hp_publish_status;
@@ -132,25 +135,25 @@ int main(void)
 	    msg.data = &mbox_message;
 	    msg.size = mbox_message_size;
 	
-	    printf("Calling mbox_send with:\n"
-		   "  .lp_wake_count=%d\n"
-		   "  .hp_wake_count=%d\n"
-		   "  .temp_c_x10=%d\n"
-		   "  .rh_x10=%d\n"
-		   "  .most_recent_publish_status_p=0x%x\n",
-		   ((lp_to_hp_shared_data_t *) msg.data)->lp_wake_count,
-		   ((lp_to_hp_shared_data_t *) msg.data)->hp_wake_count,	   
-		   ((lp_to_hp_shared_data_t *) msg.data)->temp_c_x10,
-		   ((lp_to_hp_shared_data_t *) msg.data)->rh_x10,
+            // Collapsed into a single string macro
+	    LOG_DBG("Calling mbox_send with:\n" \
+                    "  .lp_wake_count=%d\n" \
+		    "  .hp_wake_count=%d\n" \
+		    "  .temp_c_x10=%d .rh_x10=%d\n" \
+		    "  .most_recent_publish_status_p=0x%x", \
+		   ((lp_to_hp_shared_data_t *) msg.data)->lp_wake_count, \
+		   ((lp_to_hp_shared_data_t *) msg.data)->hp_wake_count, \	   
+		   ((lp_to_hp_shared_data_t *) msg.data)->temp_c_x10, \
+		   ((lp_to_hp_shared_data_t *) msg.data)->rh_x10, \
 		   (uint32_t)((lp_to_hp_shared_data_t *) msg.data)->most_recent_publish_status_p);
 	
 	    if (mbox_send_dt(&tx_channel, &msg) < 0) {
-		printf("mbox_send() error\n");
+		LOG_ERR("mbox_send() error");
 	    }
 	
 	    k_msleep(100);
 	} else {
-            printf("Skipping HP wake. Actively waiting for network receipt.\n");
+            LOG_DBG("Skipping HP wake. Actively waiting for network receipt.");
             wakeups_since_last_publish++;
         }	
     }
@@ -161,7 +164,7 @@ int main(void)
     
 #endif //  not CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE
 
-    printf("LP core Going to sleep\n");
+    LOG_DBG("LP core Going to sleep");
         
     if (cfg->sleep_duration_ticks) {
 	ulp_lp_core_lp_timer_set_wakeup_ticks

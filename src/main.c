@@ -12,12 +12,15 @@
 #include <zephyr/drivers/hwinfo.h>
 #include <zephyr/drivers/mbox.h>
 #include <zephyr/sys/poweroff.h>
+#include <zephyr/logging/log.h>
 #include <esp_attr.h>
 
 #include <esp_sleep.h>
 #include <ulp_lp_core.h>
 
 #include "shared_data.h"
+
+LOG_MODULE_REGISTER(lps_hp, CONFIG_LPS_LOG_LEVEL);
 
 extern bool lps_send_update(lp_to_hp_shared_data_t *);
 
@@ -43,9 +46,9 @@ static void callback(const struct device *dev,
 		     void *user_data,
 		     struct mbox_msg *data)
 {
-    printk("calling callback(channel_id=%d, user_data=%x, data=%x\n",
+    LOG_DBG("calling callback(channel_id=%d, user_data=0x%x, data=0x%x)",
 	   (uint32_t) channel_id, (uint32_t)user_data, (uint32_t)data);
-    printk("                 data->size=%d, data->data=%x\n",
+    LOG_DBG("                 data->size=%d, data->data=0x%x",
 	   (uint32_t)data->size, (uint32_t)data->data);
     if (callback_count++ > 0) {
 	memcpy(&g_mbox_received_data, data->data,
@@ -76,54 +79,53 @@ int main(void)
 #else
     if (true) {
 #endif
-        printk(">>> HP WAKE: Woken by LP Core! <<<\n");
+        LOG_DBG(">>> HP WAKE: Woken by LP Core! <<<");
 
 	if (mbox_register_callback_dt(&rx_channel, callback, NULL)) {
-	    printk("mbox_register_callback() error\n");
+	    LOG_ERR("mbox_register_callback() error");
 	    return 0;
 	}
 	else {
-	    printk("registered mbox callback\n");
+	    LOG_DBG("registered mbox callback");
 	}
 
 	if (mbox_set_enabled_dt(&rx_channel, 1)) {
-	    printk("mbox_set_enable() error\n");
+	    LOG_ERR("mbox_set_enable() error");
 	    return 0;
 	}
 	else {
-	    printk("enabled mbox\n");
+	    LOG_DBG("enabled mbox");
 	}
 
-	
-	printk("Waiting for message from LP core to appear in mbox\n");
+	LOG_DBG("Waiting for message from LP core to appear in mbox");
 	
 	while (!mbox_message_received) {
 	    k_msleep(50);
 	}
 
-	printk("mbox message received\n");
 
-	printk("Message value received:\n"
-	       "  .lp_wake_count=%d\n"
-	       "  .hp_wake_count=%d\n"
-	       "  .temp_c_x10=%d\n"
-	       "  .rh_x10=%d\n",
-	       g_mbox_received_data.lp_wake_count,
-	       g_mbox_received_data.hp_wake_count,
-	       g_mbox_received_data.temp_c_x10,
+	LOG_DBG("Message value received:" \
+	       " .lp_wake_count=%d" \
+	       " .hp_wake_count=%d" \
+	       " .temp_c_x10=%d" \
+	       " .rh_x10=%d", \
+	       g_mbox_received_data.lp_wake_count, \
+	       g_mbox_received_data.hp_wake_count, \
+	       g_mbox_received_data.temp_c_x10, \
 	       g_mbox_received_data.rh_x10);
 	
 	mbox_message_received = false;
 
 	successful_publish = lps_send_update(&g_mbox_received_data);
 
-	printk("successful_publish = %s\n", successful_publish ? "true" : "false");
+	LOG_DBG("successful_publish = %s",
+		successful_publish ? "true" : "false");
 
 	// Write the receipt directly to the LP core's RTC memory!
 	if (g_mbox_received_data.most_recent_publish_status_p != NULL) {
 	    *(g_mbox_received_data.most_recent_publish_status_p) =
 		successful_publish ? PUBLISH_STATUS_SUCCESS : PUBLISH_STATUS_FAILURE;
-	    printk("Wrote receipt %d to LP core.\n",
+	    LOG_DBG("Wrote receipt %d to LP core.",
 		*(g_mbox_received_data.most_recent_publish_status_p));
 	}
 	
@@ -132,9 +134,9 @@ int main(void)
 
     else if (first_boot)
     {	
-	printk(">>> HP BOOT: Cold start.\n");
+	LOG_DBG(">>> HP BOOT: Cold start.");
 #ifdef CONFIG_LPS_EXPLICIT_LP_IMAGE_LOADING    	
-        printk("   Loading LP firmware... ");
+        LOG_DBG("   Loading LP firmware... ");
 
         /* Load LP firmware into RTC RAM */
         ulp_lp_core_load_binary(ulp_lp_core_app_start,
@@ -149,12 +151,11 @@ int main(void)
 
 	first_boot=false;
 	
-	printk(" Done loading firmware. LP core started.\n");
+	LOG_DBG(" Done loading firmware. LP core started.");
 #endif // CONFIG_LPS_EXPLICIT_LP_IMAGE_LOADING
     }
 
-    
-    printk(">>> HP SLEEP: Entering Deep Sleep... %d <<<\n", hp_wake_count);
+    LOG_DBG(">>> HP SLEEP: Entering Deep Sleep... %d <<<", hp_wake_count);
     
     hp_wake_count++;
 	

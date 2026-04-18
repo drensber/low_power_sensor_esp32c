@@ -2,8 +2,11 @@
 #include <zephyr/net/socket.h>
 #include <zephyr/random/random.h>
 #include <zephyr/kernel.h>
+#include <zephyr/logging/log.h>
 #include "shared_data.h"
 #include "lps_wifi.h"
+
+LOG_MODULE_DECLARE(lps_hp, CONFIG_LPS_LOG_LEVEL);
 
 #define BROKER_ADDR CONFIG_LPS_MQTT_BROKER_ADDR 
 #define BROKER_PORT CONFIG_LPS_MQTT_BROKER_PORT
@@ -26,18 +29,18 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
     switch (evt->type) {
     case MQTT_EVT_CONNACK:
         if (evt->param.connack.return_code == MQTT_CONNECTION_ACCEPTED) {
-            printk("MQTT connected!\n");
+            LOG_DBG("MQTT connected!");
             k_sem_give(&mqtt_conn_sem);
         } else {
-            printk("MQTT connection refused: %d\n", evt->param.connack.return_code);
+            LOG_DBG("MQTT connection refused: %d", evt->param.connack.return_code);
         }
         break;
     case MQTT_EVT_PUBACK:
-        printk("MQTT PUBACK received! Data is safely on the broker.\n");
+        LOG_DBG("MQTT PUBACK received! Data is safely on the broker.");
         k_sem_give(&mqtt_pub_sem);
         break;
     case MQTT_EVT_DISCONNECT:
-        printk("MQTT disconnected.\n");
+        LOG_DBG("MQTT disconnected.");
         break;
     default:
         break;
@@ -73,7 +76,7 @@ static int publish_sensor_data(int32_t seq, int16_t temp_c_x10, uint16_t rh_x10,
 
     char topic[64];
     snprintf(topic, sizeof(topic), "sensors/%s/env", device_id);
-    printf("publishing to topic %s\n", topic);
+    LOG_DBG("publishing to topic %s", topic);
     
     struct mqtt_publish_param param;
 
@@ -106,7 +109,7 @@ static bool send_mqtt_update(void)
     for (int session = 0; session < 2; session++) {
         
         if (session > 0) {
-            printk("\n--- Initiating Costly Recovery (Session Attempt %d/2) ---\n", session + 1);
+            LOG_DBG("--- Initiating Costly Recovery (Session Attempt %d/2) ---", session + 1);
             k_msleep(1000); // 1-second physical delay to let Router/RF clear
         }
 
@@ -138,19 +141,19 @@ static bool send_mqtt_update(void)
         // INNER LOOP: specifically mitigates the -22 EINVAL local OS race condition
         int err = -1;
         for (int attempts = 0; attempts < 3; attempts++) {
-            printk("Connecting to MQTT broker (Attempt %d/3)...\n", attempts + 1);
+            LOG_DBG("Connecting to MQTT broker (Attempt %d/3)...", attempts + 1);
             err = mqtt_connect(&client_ctx);
             
             if (err == 0) {
                 break; 
             }
 
-            printk("Connection failed: %d. Backing off...\n", err);
+            LOG_DBG("Connection failed: %d. Backing off...", err);
             k_msleep(500); // 500ms guarantees Zephyr's internal IPv4 tables are up
         }
 
         if (err != 0) {
-            printk("Session %d: Failed to connect.\n", session + 1);
+            LOG_DBG("Session %d: Failed to connect.", session + 1);
             continue; // Trigger the Master Recovery Loop
         }
 
@@ -170,17 +173,17 @@ static bool send_mqtt_update(void)
         }
 
         if (!connected) {
-            printk("Session %d: Timeout waiting for CONNACK.\n", session + 1);
+            LOG_DBG("Session %d: Timeout waiting for CONNACK.", session + 1);
             mqtt_disconnect(&client_ctx, NULL); // Safely close the orphaned socket
             continue; // Trigger the Master Recovery Loop
         }
 
-        printk("Publishing data...\n");
+        LOG_DBG("Publishing data...");
 
 	uint8_t is_dup = (session > 0) ? 1 : 0;
 	
         if (publish_sensor_data(sensor_data->hp_wake_count, sensor_data->temp_c_x10, sensor_data->rh_x10, current_msg_id, is_dup) != 0) {
-            printk("Session %d: Failed to enqueue publish.\n", session + 1);
+            LOG_DBG("Session %d: Failed to enqueue publish.", session + 1);
             mqtt_disconnect(&client_ctx, NULL);
             continue; 
         }
@@ -198,7 +201,7 @@ static bool send_mqtt_update(void)
         }
 
         if (!published) {
-            printk("Session %d: Timed out waiting for PUBACK. Network loss suspected.\n", session + 1);
+            LOG_DBG("Session %d: Timed out waiting for PUBACK. Network loss suspected.", session + 1);
             mqtt_disconnect(&client_ctx, NULL);
             continue; // Trigger the Master Recovery Loop!
         }
@@ -211,7 +214,7 @@ static bool send_mqtt_update(void)
 
     // Only if BOTH sessions completely failed do we drop the nuclear bomb
     if (!successful_publish) {
-        printk("Fatal: Exhausted all recovery attempts. Invalidating cache.\n");
+        LOG_DBG("Fatal: Exhausted all recovery attempts. Invalidating cache.");
         lps_wifi_invalidate_dhcp_cache();
     }
 
@@ -227,7 +230,7 @@ bool lps_send_update(lp_to_hp_shared_data_t *data) {
         successful_publish = send_mqtt_update();
     } else {
         // Wi-Fi failed. Skip MQTT, invalidate caches, and tear down immediately.
-        printk("Skipping MQTT publish due to Wi-Fi failure.\n");
+        LOG_DBG("Skipping MQTT publish due to Wi-Fi failure.");
         lps_wifi_invalidate_dhcp_cache();
     }
     
