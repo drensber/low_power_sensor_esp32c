@@ -1,0 +1,12 @@
+/ {
+	chosen {
+		/* Tell the OpenThread stack where to save the
+                   Active Operational Dataset */
+		zephyr,ot-storage = &storage_partition;
+	};
+};
+
+/* Enable the IEEE 802.15.4 physical radio MAC */
+&ieee802154 {
+	status = "okay";
+};

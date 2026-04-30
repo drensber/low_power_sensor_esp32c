@@ -17,6 +17,7 @@
         };
 };
 
+/* Disable this for production, because it consumes about 100uA */
 &lp_uart {
 	status = "okay";
         current-speed = <115200>;

@@ -11,8 +11,8 @@ LOG_MODULE_DECLARE(lps_lp, CONFIG_LPS_LOG_LEVEL);
 
 #include "ulp_lp_core_gpio.h" // Drop to the lowest level GPIO macros
 
-#define SCL_PIN 6
-#define SDA_PIN 7
+#define SCL_PIN 0
+#define SDA_PIN 1
 #define AHT20_ADDR AHT20_I2C_ADDR
 
 // --- 1. Raw GPIO Open-Drain Primitives ---

@@ -17,6 +17,13 @@
         };
 };
 
+// Change this from the default to "disabled" for production because it consumes about 100uA
+/*
+&lp_uart {
+	status = "disabled";
+};
+*/
+
 /* Leaving this here for when Zephyr support for LP i2c is added
 
 &lp_i2c0 {

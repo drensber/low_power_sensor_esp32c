@@ -9,6 +9,9 @@ set(REMOTE_ZEPHYR_DIR ${CMAKE_CURRENT_BINARY_DIR}/../low_power_sensor_lpcore/zep
 set(LP_FULL_BIN ${CMAKE_BINARY_DIR}/../low_power_sensor_lpcore/zephyr/zephyr.bin)
 set(LP_STRIPPED_BIN ${CMAKE_BINARY_DIR}/../low_power_sensor_lpcore/zephyr/zephyr_stripped.bin)
 
+# Tell Zephyr to look in this app's directory for snippets
+list(APPEND SNIPPET_ROOT ${CMAKE_CURRENT_SOURCE_DIR})
+
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 message(STATUS "${CONFIG_BOARD_TARGET} compile as Master in this sample")
 project(low_power_sensor_hpcore)
@@ -31,10 +34,13 @@ endif()
 
 zephyr_include_directories(include)
 
-target_sources(app PRIVATE src/main.c src/lps_mqtt_client.c src/lps_wifi.c)
+target_sources(app PRIVATE src/main.c)
 
-# Use this instead to test without wifi or MQTT broker
-#target_sources(app PRIVATE src/main.c src/test/lps_mqtt_client.c src/lps_wifi.c)
+if(CONFIG_LPS_TRANSPORT_WIFI_MQTT)
+    target_sources(app PRIVATE src/lps_wifi-mqtt_client.c  src/lps_wifi.c)
+elseif(CONFIG_LPS_TRANSPORT_THREAD_MQTTSN)
+    target_sources(app PRIVATE src/lps_mqtt-sn_client.c)
+endif()
 
 target_sources_ifdef(CONFIG_LPS_DHCP_CLIENT app PRIVATE src/lps_dhcp.c)
 target_sources_ifdef(CONFIG_LPS_EXPLICIT_LP_IMAGE_LOADING app PRIVATE src/lp_firmware.S)

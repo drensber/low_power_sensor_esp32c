@@ -60,22 +60,33 @@ static void get_device_id(char *id_buffer, size_t buffer_size)
     }
 }
 
-static int publish_sensor_data(int32_t seq, int16_t temp_c_x10, uint16_t rh_x10, uint16_t msg_id, uint8_t is_dup)
+static void get_json_message(char *json_message_buffer, size_t buffer_size, char* device_id, lp_to_hp_shared_data_t *data)
 {
-    char payload[128];
+    snprintf(json_message_buffer, buffer_size, 
+             "{\"id\": \"%s\", \"seq\": %d, \"uptime\": %d, \"temperature\": %d.%d, \"humidity\": %d.%d}", 
+             device_id,
+	     data->hp_wake_count,
+	     data->lp_wake_count,
+             (data->temp_c_x10) / 10, abs((data->temp_c_x10) % 10), 
+             (data->rh_x10) / 10, abs((data->rh_x10) % 10));    
+}
+
+static void get_topic(char *topic_buffer, size_t topic_buffer_size, char *device_id)
+{
+    snprintf(topic_buffer, topic_buffer_size, "sensors/%s/env", device_id);
+}
+
+static int publish_sensor_data(lp_to_hp_shared_data_t *sdata, uint16_t msg_id, uint8_t is_dup)
+{
     char device_id[20];
+    char payload[128];
+    char topic[64];
     
     get_device_id(device_id, sizeof(device_id));
+    get_json_message(payload, sizeof(payload), device_id, sensor_data);
+    get_topic(topic, sizeof(topic), device_id);
     
-    snprintf(payload, sizeof(payload), 
-             "{\"id\": \"%s\", \"seq\": %d, \"temperature\": %d.%d, \"humidity\": %d.%d}", 
-             device_id,
-	     seq,
-             temp_c_x10 / 10, abs(temp_c_x10 % 10), 
-             rh_x10 / 10, abs(rh_x10 % 10));
 
-    char topic[64];
-    snprintf(topic, sizeof(topic), "sensors/%s/env", device_id);
     LOG_DBG("publishing to topic %s", topic);
     
     struct mqtt_publish_param param;
@@ -182,7 +193,7 @@ static bool send_mqtt_update(void)
 
 	uint8_t is_dup = (session > 0) ? 1 : 0;
 	
-        if (publish_sensor_data(sensor_data->hp_wake_count, sensor_data->temp_c_x10, sensor_data->rh_x10, current_msg_id, is_dup) != 0) {
+        if (publish_sensor_data(sensor_data, current_msg_id, is_dup) != 0) {
             LOG_DBG("Session %d: Failed to enqueue publish.", session + 1);
             mqtt_disconnect(&client_ctx, NULL);
             continue; 

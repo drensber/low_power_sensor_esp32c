@@ -5,6 +5,45 @@ module-help = Low Power Sensor app
 source "Kconfig.zephyr"
 rsource "Kconfig.lp_hp_shared"
 
+choice LPS_TRANSPORT_AND_TELEMETRY_PROTOCOL
+	prompt "LPS Transport and Telemetry Protocol"
+	default LPS_TRANSPORT_WIFI_MQTT
+	help
+	  Select the network transport and messaging protocol combination
+	  for the sensor node.
+
+	config LPS_TRANSPORT_WIFI_MQTT
+		bool "WiFi + Standard MQTT"
+                select NETWORKING
+                select NET_SOCKETS
+                select NET_UDP
+                select NET_IPV4
+                select NET_TCP
+                select NET_ARP_GRATUITOUS
+                select MQTT_LIB
+                select MQTT_CLEAN_SESSION
+		select WIFI
+                select WIFI_ESP32
+		help
+		  Use standard WiFi for the transport layer and TCP-based 
+		  MQTT for telemetry. This is easiest to set up but uses 
+		  more battery.
+
+	config LPS_TRANSPORT_THREAD_MQTTSN
+		bool "OpenThread + MQTT-SN"
+                select NETWORKING
+                select NET_SOCKETS
+                select NET_UDP
+                select NET_IPV6
+                select MQTT_SN_LIB
+		select NET_L2_OPENTHREAD
+		help
+		  Use an 802.15.4 OpenThread mesh for the transport layer 
+		  and UDP-based MQTT-SN. Required for hitting the ~20uA 
+		  deep-sleep floor.
+
+endchoice
+
 config LPS_EXPLICIT_LP_IMAGE_LOADING
     bool "Load the LP image based on directives within the application"
     default n

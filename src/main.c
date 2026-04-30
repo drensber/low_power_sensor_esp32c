@@ -158,10 +158,11 @@ int main(void)
     LOG_DBG(">>> HP SLEEP: Entering Deep Sleep... %d <<<", hp_wake_count);
     
     hp_wake_count++;
-	
-    // 2. Allow UART to flush before cutting power
-    k_msleep(50); 
 
+#ifdef CONFIG_LOG    
+    // 2. Allow UART to flush before cutting power (make sure it's long enough)
+    k_msleep(1500); 
+#endif // CONFIG_LOG
     // 3. Enable ULP wakeup (keeps LP core powered on!)
     esp_sleep_enable_ulp_wakeup();
 
