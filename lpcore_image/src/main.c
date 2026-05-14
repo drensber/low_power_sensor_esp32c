@@ -78,7 +78,6 @@ int main(void)
         }
     }    
 
-#ifndef CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE
     bool time_threshold_exceeded=true;
     bool temperature_threshold_exceeded=true;
     bool humidity_threshold_exceeded=true; 
@@ -162,7 +161,6 @@ int main(void)
     }
 
     
-#endif //  not CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE
 
     LOG_DBG("LP core Going to sleep");
         
