@@ -3,7 +3,7 @@
 #include <zephyr/random/random.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
-#include "shared_data.h"
+#include "lps_shared.h"
 #include "lps_wifi.h"
 
 LOG_MODULE_DECLARE(lps_hp, CONFIG_LPS_LOG_LEVEL);
@@ -45,35 +45,6 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
     default:
         break;
     }
-}
-
-static void get_device_id(char *id_buffer, size_t buffer_size)
-{
-    struct net_if *iface = net_if_get_default();
-    struct net_linkaddr *link_addr = net_if_get_link_addr(iface);
-
-    if (link_addr && link_addr->len == 6) {
-        snprintf(id_buffer, buffer_size, "lps_%02x%02x%02x",
-                 link_addr->addr[3], link_addr->addr[4], link_addr->addr[5]);
-    } else {
-        snprintf(id_buffer, buffer_size, "unknown_device");
-    }
-}
-
-static void get_json_message(char *json_message_buffer, size_t buffer_size, char* device_id, lp_to_hp_shared_data_t *data)
-{
-    snprintf(json_message_buffer, buffer_size, 
-             "{\"id\": \"%s\", \"seq\": %d, \"uptime\": %d, \"temperature\": %d.%d, \"humidity\": %d.%d}", 
-             device_id,
-	     data->hp_wake_count,
-	     data->lp_wake_count,
-             (data->temp_c_x10) / 10, abs((data->temp_c_x10) % 10), 
-             (data->rh_x10) / 10, abs((data->rh_x10) % 10));    
-}
-
-static void get_topic(char *topic_buffer, size_t topic_buffer_size, char *device_id)
-{
-    snprintf(topic_buffer, topic_buffer_size, "sensors/%s/env", device_id);
 }
 
 static int publish_sensor_data(lp_to_hp_shared_data_t *sdata, uint16_t msg_id, uint8_t is_dup)

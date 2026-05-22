@@ -36,6 +36,7 @@ choice LPS_TRANSPORT_AND_TELEMETRY_PROTOCOL
                 select NET_UDP
                 select NET_IPV6
                 select MQTT_SN_LIB
+                select MQTT_SN_TRANSPORT_UDP
 		select NET_L2_OPENTHREAD
 		help
 		  Use an 802.15.4 OpenThread mesh for the transport layer 

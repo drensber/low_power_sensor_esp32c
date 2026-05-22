@@ -34,7 +34,7 @@ endif()
 
 zephyr_include_directories(include)
 
-target_sources(app PRIVATE src/main.c)
+target_sources(app PRIVATE src/main.c src/lps_shared.c)
 
 if(CONFIG_LPS_TRANSPORT_WIFI_MQTT)
     target_sources(app PRIVATE src/lps_wifi-mqtt_client.c  src/lps_wifi.c)
