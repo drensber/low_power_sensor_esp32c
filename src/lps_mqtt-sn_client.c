@@ -161,15 +161,6 @@ bool lps_send_update(lp_to_hp_shared_data_t *sensor_data)
     static struct mqtt_sn_data pub_data;
     static struct mqtt_sn_data pub_topic;
     
-#if 0    
-    static struct mqtt_sn_data topic = MQTT_SN_DATA_STRING_LITERAL("sensors/esp32c6/env");
-
-    snprintf(payload, sizeof(payload), 
-             "{\"temp\": %d.%d, \"hum\": %d.%d}", 
-             sensor_data->temp_c_x10 / 10, abs(sensor_data->temp_c_x10 % 10),
-             sensor_data->rh_x10 / 10, abs(sensor_data->rh_x10 % 10));
-#endif
-
     get_device_id(device_id, sizeof(device_id));
     get_json_message(payload, sizeof(payload), device_id, sensor_data);
     get_topic(topic, sizeof(topic), device_id);
@@ -182,32 +173,39 @@ bool lps_send_update(lp_to_hp_shared_data_t *sensor_data)
 
     /* 3. STRICTLY One-Time Initialization */
     if (!is_net_initialized) {
-        LOG_DBG("--- Initializing MQTT-SN OS Structures ---");
-        
-        struct sockaddr_in6 mcast_addr = {0};
-        mcast_addr.sin6_family = AF_INET6;
-        mcast_addr.sin6_port = htons(0); 
-        zsock_inet_pton(AF_INET6, "ff03::1", &mcast_addr.sin6_addr);
+        /* 3. OS Initialization & State Flushing */
+	static bool is_socket_bound = false;
 
-        if (mqtt_sn_transport_udp_init(&sn_transport, (struct sockaddr *)&mcast_addr, sizeof(mcast_addr)) < 0) {
-            return false;
-        }
+	if (!is_socket_bound) {
+	    LOG_DBG("--- Binding UDP Socket ---");
+	    struct sockaddr_in6 mcast_addr = {0};
+	    mcast_addr.sin6_family = AF_INET6;
+	    mcast_addr.sin6_port = htons(0); 
+	    zsock_inet_pton(AF_INET6, "ff03::1", &mcast_addr.sin6_addr);
 
-        struct mqtt_sn_data client_id = MQTT_SN_DATA_STRING_LITERAL("esp32c6_sensor");
-        if (mqtt_sn_client_init(&sn_client, &client_id, &sn_transport.tp, mqtt_sn_evt_cb, 
-                                mqtt_sn_tx_buf, sizeof(mqtt_sn_tx_buf), 
-                                mqtt_sn_rx_buf, sizeof(mqtt_sn_rx_buf)) < 0) {
-            return false;
-        }
+	    if (mqtt_sn_transport_udp_init(&sn_transport, (struct sockaddr *)&mcast_addr, sizeof(mcast_addr)) < 0) {
+		return false;
+	    }
+	    is_socket_bound = true;
+	}
 
-        struct sockaddr_in6 gw_addr = {0};
-        gw_addr.sin6_family = AF_INET6;
-        gw_addr.sin6_port = htons(CONFIG_LPS_MQTT_BROKER_PORT);
-        zsock_inet_pton(AF_INET6, CONFIG_LPS_MQTT_BROKER_ADDR, &gw_addr.sin6_addr);
-        
-        struct mqtt_sn_data gw_addr_data = { .data = (const uint8_t *)&gw_addr, .size = sizeof(gw_addr) };
-        mqtt_sn_add_gw(&sn_client, 1, gw_addr_data);
+	/* --- THE FIX: Always re-init the client to flush Zephyr's dirty TX queues --- */
+	LOG_DBG("Flushing MQTT-SN Client state...");
+	struct mqtt_sn_data client_id = MQTT_SN_DATA_STRING_LITERAL("esp32c6_sensor");
+	if (mqtt_sn_client_init(&sn_client, &client_id, &sn_transport.tp, mqtt_sn_evt_cb, 
+				mqtt_sn_tx_buf, sizeof(mqtt_sn_tx_buf), 
+				mqtt_sn_rx_buf, sizeof(mqtt_sn_rx_buf)) < 0) {
+	    return false;
+	}
 
+	struct sockaddr_in6 gw_addr = {0};
+	gw_addr.sin6_family = AF_INET6;
+	gw_addr.sin6_port = htons(CONFIG_LPS_MQTT_BROKER_PORT);
+	zsock_inet_pton(AF_INET6, CONFIG_LPS_MQTT_BROKER_ADDR, &gw_addr.sin6_addr);
+	
+	struct mqtt_sn_data gw_addr_data = { .data = (const uint8_t *)&gw_addr, .size = sizeof(gw_addr) };
+	mqtt_sn_add_gw(&sn_client, 1, gw_addr_data);
+	
         is_net_initialized = true;
     }
 
@@ -226,17 +224,19 @@ bool lps_send_update(lp_to_hp_shared_data_t *sensor_data)
     while (retries > 0 && !is_mqtt_sn_connected) {
         LOG_DBG("Sending MQTT-SN CONNECT (Attempt %d)...", 4 - retries);
         
-        if (mqtt_sn_connect(&sn_client, false, true) != 0) {
-            LOG_ERR("MQTT-SN Connect API failed");
-            if (ot != NULL) otLinkSetPollPeriod(ot, 0);
-            return false;
+        int err = mqtt_sn_connect(&sn_client, false, true);
+        if (err != 0) {
+            LOG_WRN("Connect API returned %d. Mesh routing likely converging. Waiting...", err);
+            k_msleep(1000); /* Give Thread 1 second to settle its IPv6 routes */
+            retries--;
+            continue;
         }
 
         /* Pump the socket for up to 3 seconds waiting for the CONNACK */
         pump_mqtt_sn_socket(&sn_transport, &sn_client, 3000);
 
         if (!is_mqtt_sn_connected) {
-            LOG_WRN("Timeout. Mesh likely dropped packet for Route Discovery. Retrying...");
+            LOG_WRN("Timeout waiting for CONNACK. Retrying...");
             retries--;
         }
     }
@@ -251,15 +251,17 @@ bool lps_send_update(lp_to_hp_shared_data_t *sensor_data)
     /* 6. Register & Publish */
     LOG_DBG("--- Registering & Publishing ---");
     
-    /* Call 1: Sends REGISTER packet and caches the string internally */
-    mqtt_sn_publish(&sn_client, MQTT_SN_QOS_0, &pub_topic, false, &pub_data);
-    
-    /* Pump the socket for up to 5 seconds to catch the REGACK */
-    pump_mqtt_sn_socket(&sn_transport, &sn_client, 5000);
-    
-    /* Call 2: Uses the newly cached ID to send the actual PUBLISH packet */
-    if (mqtt_sn_publish(&sn_client, MQTT_SN_QOS_0, &pub_topic, false, &pub_data) == 0) {
-        LOG_DBG("Publish dispatched!");
+    /* Single Call: Sends REGISTER (if needed) and queues the PUBLISH. 
+       If the topic is already known, it just fires the PUBLISH. */
+    if (mqtt_sn_publish(&sn_client, MQTT_SN_QOS_0, &pub_topic, false, &pub_data) != 0) {
+        LOG_ERR("Publish API failed.");
+        successful_publish = false;
+    } else {
+        /* Pump the socket. This catches the REGACK and allows Zephyr 
+           to automatically fire the queued PUBLISH packet natively. */
+        pump_mqtt_sn_socket(&sn_transport, &sn_client, 5000);
+        
+        LOG_DBG("Publish transaction complete!");
         successful_publish = true;
     }
 

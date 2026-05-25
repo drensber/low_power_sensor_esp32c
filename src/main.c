@@ -30,7 +30,6 @@ extern const uint8_t ulp_lp_core_app_end[];
 #endif // CONFIG_LPS_EXPLICIT_LP_IMAGE_LOADING
 
 static RTC_DATA_ATTR uint32_t hp_wake_count = 0;
-static RTC_DATA_ATTR uint32_t callback_count = 0;
 static RTC_DATA_ATTR bool first_boot=true;
 
 const struct mbox_dt_spec rx_channel =
@@ -38,26 +37,28 @@ const struct mbox_dt_spec rx_channel =
 static lp_to_hp_shared_data_t g_mbox_received_data;
 static mbox_channel_id_t g_mbox_received_channel;
 
-static volatile bool mbox_message_received = false;
+static K_SEM_DEFINE(mbox_sem, 0, 1);
 
 
 static void callback(const struct device *dev,
-		     mbox_channel_id_t channel_id,
-		     void *user_data,
-		     struct mbox_msg *data)
+                     mbox_channel_id_t channel_id,
+                     void *user_data,
+                     struct mbox_msg *data)
 {
-    LOG_DBG("calling callback(channel_id=%d, user_data=0x%x, data=0x%x)",
-	   (uint32_t) channel_id, (uint32_t)user_data, (uint32_t)data);
-    LOG_DBG("                 data->size=%d, data->data=0x%x",
-	   (uint32_t)data->size, (uint32_t)data->data);
-    if (callback_count++ > 0) {
-	memcpy(&g_mbox_received_data, data->data,
-	       sizeof(lp_to_hp_shared_data_t));
+    LOG_DBG("calling callback(channel_id=%d, data=0x%x)", (uint32_t) channel_id, (uint32_t)data);
 
-	g_mbox_received_channel = channel_id;
-    
-	mbox_message_received = true;
+    lp_to_hp_shared_data_t *incoming = (lp_to_hp_shared_data_t *)data->data;
+
+    /* Drop the power-on phantom interrupt instantly */
+    if (incoming->shared_magic != SHARED_DATA_MAGIC_NUMBER) {
+        return; 
     }
+    
+    memcpy(&g_mbox_received_data, data->data, sizeof(lp_to_hp_shared_data_t));
+    g_mbox_received_channel = channel_id;
+   
+    /* Safely signal the main thread that data is ready */
+    k_sem_give(&mbox_sem);
 }
 
 
@@ -99,10 +100,11 @@ int main(void)
 
 	LOG_DBG("Waiting for message from LP core to appear in mbox");
 	
-	while (!mbox_message_received) {
-	    k_msleep(50);
-	}
+        /* Thread sleeps natively until the callback gives the semaphore */
+        k_sem_take(&mbox_sem, K_FOREVER);
 
+        /* Drain any extra spurious signals that stacked up to prevent double-execution */
+        k_sem_reset(&mbox_sem);
 
 	LOG_DBG("Message value received:" \
 	       " .lp_wake_count=%d" \
@@ -114,8 +116,6 @@ int main(void)
 	       g_mbox_received_data.temp_c_x10, \
 	       g_mbox_received_data.rh_x10);
 	
-	mbox_message_received = false;
-
 	successful_publish = lps_send_update(&g_mbox_received_data);
 
 	LOG_DBG("successful_publish = %s",

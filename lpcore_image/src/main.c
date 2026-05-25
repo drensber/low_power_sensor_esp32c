@@ -145,7 +145,8 @@ int main(void)
 		   ((lp_to_hp_shared_data_t *) msg.data)->temp_c_x10, \
 		   ((lp_to_hp_shared_data_t *) msg.data)->rh_x10, \
 		   (uint32_t)((lp_to_hp_shared_data_t *) msg.data)->most_recent_publish_status_p);
-	
+
+	    mbox_message.shared_magic = SHARED_DATA_MAGIC_NUMBER;
 	    if (mbox_send_dt(&tx_channel, &msg) < 0) {
 		LOG_ERR("mbox_send() error");
 	    }
