@@ -35,6 +35,15 @@ static RTC_DATA_ATTR volatile publish_status_t hp_publish_status = PUBLISH_STATU
 static RTC_DATA_ATTR bool waiting_for_ack = false;
 
 const struct mbox_dt_spec tx_channel = MBOX_DT_SPEC_GET(DT_PATH(mbox_consumer), tx);
+const struct mbox_dt_spec rx_channel = MBOX_DT_SPEC_GET(DT_PATH(mbox_consumer), rx);
+
+static void mbox_callback(const struct device *dev,
+	        	     mbox_channel_id_t channel_id, 
+                             void *user_data, struct mbox_msg *data) 
+{
+    LOG_DBG("LP core mbox_callback called");
+ 
+}
 
 int main(void)
 {
@@ -43,6 +52,9 @@ int main(void)
 
     int max_transfer_size_bytes = mbox_mtu_get_dt(&tx_channel);
     int mbox_message_size = sizeof(mbox_message);
+
+    mbox_register_callback_dt(&rx_channel, mbox_callback, NULL);
+    mbox_set_enabled_dt(&rx_channel, 1);
     
     if (mbox_message_size > max_transfer_size_bytes) {
 	LOG_DBG("Size of mbox_message is %d bytes (max is %d)",
@@ -54,8 +66,6 @@ int main(void)
     mbox_message.lp_wake_count++;
 
     read_aht20(&mbox_message);    
-
-
 
     if (waiting_for_ack) {
         if (hp_publish_status == PUBLISH_STATUS_SUCCESS) {
@@ -128,8 +138,6 @@ int main(void)
 	    ulp_lp_core_wakeup_main_processor();
 	    mbox_message.hp_wake_count++;
 
-	    // Give HP core time to boot to the point where it can recieve mbox messages
-	    k_msleep(1000);
 	
 	    msg.data = &mbox_message;
 	    msg.size = mbox_message_size;

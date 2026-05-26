@@ -13,6 +13,8 @@
 #include <zephyr/drivers/mbox.h>
 #include <zephyr/sys/poweroff.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/devicetree.h>
+
 #include <esp_attr.h>
 
 #include <esp_sleep.h>
@@ -34,8 +36,15 @@ static RTC_DATA_ATTR bool first_boot=true;
 
 const struct mbox_dt_spec rx_channel =
     MBOX_DT_SPEC_GET(DT_PATH(mbox_consumer), rx);
-static lp_to_hp_shared_data_t g_mbox_received_data;
-static mbox_channel_id_t g_mbox_received_channel;
+const struct mbox_dt_spec tx_channel =
+    MBOX_DT_SPEC_GET(DT_PATH(mbox_consumer), tx);
+
+#define SHM_NODE DT_CHOSEN(zephyr_ipc_shm)
+#define SHM_BASE_ADDR DT_REG_ADDR(SHM_NODE)
+
+/* Create a direct window into the RTC SRAM */
+volatile lp_to_hp_shared_data_t *shared_data = 
+    (volatile lp_to_hp_shared_data_t *)SHM_BASE_ADDR;
 
 static K_SEM_DEFINE(mbox_sem, 0, 1);
 
@@ -53,10 +62,7 @@ static void callback(const struct device *dev,
     if (incoming->shared_magic != SHARED_DATA_MAGIC_NUMBER) {
         return; 
     }
-    
-    memcpy(&g_mbox_received_data, data->data, sizeof(lp_to_hp_shared_data_t));
-    g_mbox_received_channel = channel_id;
-   
+       
     /* Safely signal the main thread that data is ready */
     k_sem_give(&mbox_sem);
 }
@@ -98,35 +104,41 @@ int main(void)
 	    LOG_DBG("enabled mbox");
 	}
 
-	LOG_DBG("Waiting for message from LP core to appear in mbox");
+	/* first boot requires a bit of a delay to give LP core time to do its initial read */
+	if (hp_wake_count == 0) {
+	    k_msleep(3000); 
+	}
 	
+#ifdef CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE
+	LOG_DBG("Waiting for message from LP core to appear in mbox");	
         /* Thread sleeps natively until the callback gives the semaphore */
         k_sem_take(&mbox_sem, K_FOREVER);
 
         /* Drain any extra spurious signals that stacked up to prevent double-execution */
         k_sem_reset(&mbox_sem);
+#endif // CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE
 
 	LOG_DBG("Message value received:" \
 	       " .lp_wake_count=%d" \
 	       " .hp_wake_count=%d" \
 	       " .temp_c_x10=%d" \
 	       " .rh_x10=%d", \
-	       g_mbox_received_data.lp_wake_count, \
-	       g_mbox_received_data.hp_wake_count, \
-	       g_mbox_received_data.temp_c_x10, \
-	       g_mbox_received_data.rh_x10);
+	       shared_data->lp_wake_count, \
+	       shared_data->hp_wake_count, \
+	       shared_data->temp_c_x10, \
+	       shared_data->rh_x10);
 	
-	successful_publish = lps_send_update(&g_mbox_received_data);
+	successful_publish = lps_send_update(shared_data);
 
 	LOG_DBG("successful_publish = %s",
 		successful_publish ? "true" : "false");
 
 	// Write the receipt directly to the LP core's RTC memory!
-	if (g_mbox_received_data.most_recent_publish_status_p != NULL) {
-	    *(g_mbox_received_data.most_recent_publish_status_p) =
+	if (shared_data->most_recent_publish_status_p != NULL) {
+	    *(shared_data->most_recent_publish_status_p) =
 		successful_publish ? PUBLISH_STATUS_SUCCESS : PUBLISH_STATUS_FAILURE;
 	    LOG_DBG("Wrote receipt %d to LP core.",
-		*(g_mbox_received_data.most_recent_publish_status_p));
+		*(shared_data->most_recent_publish_status_p));
 	}
 	
         k_msleep(50); // Allow logs to flush
