@@ -109,13 +109,11 @@ int main(void)
 	    k_msleep(3000); 
 	}
 	
-#ifdef CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE
+#if defined(CONFIG_LPS_USE_LIGHT_SLEEP) \
+    || defined(CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE)	
 	LOG_DBG("Waiting for message from LP core to appear in mbox");	
         /* Thread sleeps natively until the callback gives the semaphore */
         k_sem_take(&mbox_sem, K_FOREVER);
-
-        /* Drain any extra spurious signals that stacked up to prevent double-execution */
-        k_sem_reset(&mbox_sem);
 #endif // CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE
 
 	LOG_DBG("Message value received:" \
@@ -188,7 +186,10 @@ int main(void)
 #endif // CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE
 
 #if defined(CONFIG_LPS_USE_LIGHT_SLEEP) \
-    || defined(CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE)    
+    || defined(CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE)
+    /* Drain any extra spurious signals that stacked up to prevent double-execution */
+    k_sem_reset(&mbox_sem);
+
     } // while (1) infinite loop
 #endif    
 
