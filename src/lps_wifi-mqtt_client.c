@@ -17,7 +17,7 @@ static struct mqtt_client client_ctx;
 static struct sockaddr_in broker;
 static struct zsock_pollfd fds[1];
 
-lp_to_hp_shared_data_t *sensor_data;
+volatile lp_to_hp_shared_data_t *sensor_data;
 
 // Event notification semaphores
 static K_SEM_DEFINE(mqtt_conn_sem, 0, 1);
@@ -47,7 +47,8 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
     }
 }
 
-static int publish_sensor_data(lp_to_hp_shared_data_t *sdata, uint16_t msg_id, uint8_t is_dup)
+static int publish_sensor_data(volatile lp_to_hp_shared_data_t *sdata,
+			       uint16_t msg_id, uint8_t is_dup)
 {
     char device_id[20];
     char payload[128];
@@ -203,7 +204,7 @@ static bool send_mqtt_update(void)
     return successful_publish;
 }
 
-bool lps_send_update(lp_to_hp_shared_data_t *data) {
+bool lps_send_update(volatile lp_to_hp_shared_data_t *data) {
     sensor_data = data;
     bool successful_publish = false;
     

@@ -21,14 +21,8 @@ static uint8_t mqtt_sn_rx_buf[512];
 static struct mqtt_sn_client sn_client;
 static struct mqtt_sn_transport_udp sn_transport; /* Zephyr 4.4 Transport Wrapper */
 
-static struct sockaddr_in6 gateway_addr;
-
 static volatile bool is_mqtt_sn_connected = false;
-
-static bool is_mqtt_sn_initialized = false;
-static bool is_gateway_connected = false;
-static bool is_topic_registered = false;
-
+volatile lp_to_hp_shared_data_t *sensor_data;
 
 /* Zephyr 4.4 strictly requires an event callback */
 static void mqtt_sn_evt_cb(struct mqtt_sn_client *client, const struct mqtt_sn_evt *evt)
@@ -46,10 +40,6 @@ static void mqtt_sn_evt_cb(struct mqtt_sn_client *client, const struct mqtt_sn_e
             break;
     }
 }
-
-
-lp_to_hp_shared_data_t *sensor_data;
-static bool open_thread_configured=false;
 
 
 /* * Blocks until the OpenThread stack successfully attaches to the mesh.
@@ -84,51 +74,6 @@ static bool wait_for_thread_mesh(uint32_t timeout_ms) {
     return false;
 }
 
-static bool lps_mqtt_sn_register_topic(struct mqtt_sn_client *client, struct mqtt_sn_data *topic) 
-{
-    LOG_DBG("Initiating Topic Registration for: %s", topic->data);
-
-    /* Zephyr drops the payload during REGISTER, so we feed it an empty dummy struct */
-    struct mqtt_sn_data dummy_payload = {0};
-
-    if (mqtt_sn_publish(client, MQTT_SN_QOS_0, topic, false, &dummy_payload) != 0) {
-        LOG_ERR("MQTT-SN Register API failed");
-        return false;
-    }
-
-    struct zsock_pollfd reg_fds[1] = {
-        { .fd = sn_transport.sock, .events = ZSOCK_POLLIN, .revents = 0 }
-    };
-
-    /* Block until the REGACK arrives */
-    int reg_timeout = 15000; /* Give the mesh 15 seconds to converge on first boot */
-    while (!is_topic_registered && reg_timeout > 0) {
-        if (zsock_poll(reg_fds, 1, 1000) > 0) {
-            mqtt_sn_input(client); 
-            LOG_DBG("Topic successfully registered!");
-            return true;
-        }
-        reg_timeout -= 1000;
-    }
-
-    
-    LOG_ERR("Timeout: Gateway never sent REGACK");
-    return false;
-}
-
-static bool lps_mqtt_sn_publish_payload(struct mqtt_sn_client *client, struct mqtt_sn_data *topic, struct mqtt_sn_data *payload) 
-{
-    LOG_DBG("Sending the actual PUBLISH packet...");
-
-    /* Because the topic string is now cached, Zephyr swaps it for the ID and fires */
-    if (mqtt_sn_publish(client, MQTT_SN_QOS_0, topic, false, payload) != 0) {
-        LOG_ERR("MQTT-SN Publish API failed");
-        return false;
-    }
-    
-    LOG_DBG("PUBLISH successful!");
-    return true;
-}
 
 static void pump_mqtt_sn_socket(struct mqtt_sn_transport_udp *transport, 
                                 struct mqtt_sn_client *client, 
@@ -147,7 +92,7 @@ static void pump_mqtt_sn_socket(struct mqtt_sn_transport_udp *transport,
     }
 }
 
-bool lps_send_update(lp_to_hp_shared_data_t *sensor_data) 
+bool lps_send_update(volatile lp_to_hp_shared_data_t *sensor_data) 
 {
     static bool successful_publish = false;
     /* 1. Persistent OS Context */
@@ -248,21 +193,35 @@ bool lps_send_update(lp_to_hp_shared_data_t *sensor_data)
     }
 
 
-    /* 6. Register & Publish */
-    LOG_DBG("--- Registering & Publishing ---");
+    /* 6. Register & Publish with QoS 1 Handshake Confirmation */
+    LOG_DBG("--- Registering & Publishing (QoS 1) ---");
     
-    /* Single Call: Sends REGISTER (if needed) and queues the PUBLISH. 
-       If the topic is already known, it just fires the PUBLISH. */
-    if (mqtt_sn_publish(&sn_client, MQTT_SN_QOS_0, &pub_topic, false, &pub_data) != 0) {
+    /* Upgrade to QoS 1 so the library tracks the transaction and mandates a PUBACK */
+    if (mqtt_sn_publish(&sn_client, MQTT_SN_QOS_1, &pub_topic, false, &pub_data) != 0) {
         LOG_ERR("Publish API failed.");
         successful_publish = false;
     } else {
-        /* Pump the socket. This catches the REGACK and allows Zephyr 
-           to automatically fire the queued PUBLISH packet natively. */
-        pump_mqtt_sn_socket(&sn_transport, &sn_client, 5000);
-        
-        LOG_DBG("Publish transaction complete!");
-        successful_publish = true;
+        /* Poll the socket and wait for the internal tracking queue to empty,
+           proving Zephyr successfully intercepted and processed the incoming PUBACK */
+        int ack_timeout_ms = 15000;
+        successful_publish = false;
+
+        while (ack_timeout_ms > 0) {
+            /* Feed incoming datagrams to the state machine */
+            pump_mqtt_sn_socket(&sn_transport, &sn_client, 250);
+            
+            /* Zephyr tracks pending QoS 1/2 acknowledgments in the client.publish list */
+            if (sys_slist_is_empty(&sn_client.publish)) {
+                LOG_DBG("PUBACK received! Publish safely confirmed by Gateway.");
+                successful_publish = true;
+                break;
+            }
+            ack_timeout_ms -= 250;
+        }
+
+        if (!successful_publish) {
+            LOG_ERR("Publish transaction failed: Timeout waiting for Gateway PUBACK.");
+        }
     }
 
     /* 7. Clean Disconnect */
@@ -273,7 +232,9 @@ bool lps_send_update(lp_to_hp_shared_data_t *sensor_data)
     pump_mqtt_sn_socket(&sn_transport, &sn_client, 500);
 
     /* Drop MAC poll to save power */
-    if (ot != NULL) otLinkSetPollPeriod(ot, 0);
+    if (ot != NULL) {
+        otLinkSetPollPeriod(ot, 0);
+    }
 
     return successful_publish;
 }

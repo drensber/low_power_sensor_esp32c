@@ -67,6 +67,8 @@ int main(void)
 
     read_aht20(&mbox_message);    
 
+    LOG_DBG("hp_publish_status is %d", hp_publish_status);
+    
     if (waiting_for_ack) {
         if (hp_publish_status == PUBLISH_STATUS_SUCCESS) {
             LOG_DBG("Previous publish SUCCEEDED.");
@@ -134,8 +136,10 @@ int main(void)
             mbox_message.most_recent_publish_status_p = &hp_publish_status;
             hp_publish_status = PUBLISH_STATUS_PENDING; // Reset to pending
             waiting_for_ack = true;
-           	
+
+#ifndef CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE	    
 	    ulp_lp_core_wakeup_main_processor();
+#endif	    
 	    mbox_message.hp_wake_count++;
 
 	
@@ -147,13 +151,16 @@ int main(void)
                     "  .lp_wake_count=%d\n" \
 		    "  .hp_wake_count=%d\n" \
 		    "  .temp_c_x10=%d .rh_x10=%d\n" \
-		    "  .most_recent_publish_status_p=0x%x", \
+		    "  .most_recent_publish_status_p=0x%x",		\
 		   ((lp_to_hp_shared_data_t *) msg.data)->lp_wake_count, \
-		   ((lp_to_hp_shared_data_t *) msg.data)->hp_wake_count, \	   
+		   ((lp_to_hp_shared_data_t *) msg.data)->hp_wake_count, \
 		   ((lp_to_hp_shared_data_t *) msg.data)->temp_c_x10, \
 		   ((lp_to_hp_shared_data_t *) msg.data)->rh_x10, \
 		   (uint32_t)((lp_to_hp_shared_data_t *) msg.data)->most_recent_publish_status_p);
 
+	    LOG_DBG("  *(most_recent_publish_status_p) = %d", \
+		    (uint32_t)*(((lp_to_hp_shared_data_t *) msg.data)->most_recent_publish_status_p));
+		
 	    mbox_message.shared_magic = SHARED_DATA_MAGIC_NUMBER;
 	    if (mbox_send_dt(&tx_channel, &msg) < 0) {
 		LOG_ERR("mbox_send() error");

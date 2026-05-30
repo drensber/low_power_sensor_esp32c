@@ -24,7 +24,7 @@
 
 LOG_MODULE_REGISTER(lps_hp, CONFIG_LPS_LOG_LEVEL);
 
-extern bool lps_send_update(lp_to_hp_shared_data_t *);
+extern bool lps_send_update(volatile lp_to_hp_shared_data_t *);
 
 #ifdef CONFIG_LPS_EXPLICIT_LP_IMAGE_LOADING    
 extern const uint8_t ulp_lp_core_app_start[];
@@ -106,7 +106,9 @@ int main(void)
 
 	/* first boot requires a bit of a delay to give LP core time to do its initial read */
 	if (hp_wake_count == 0) {
-	    k_msleep(3000); 
+	    while (shared_data->shared_magic != SHARED_DATA_MAGIC_NUMBER) {
+		k_msleep(50);
+	    }
 	}
 	
 #if defined(CONFIG_LPS_USE_LIGHT_SLEEP) \
