@@ -26,12 +26,14 @@ void get_json_message(char *json_message_buffer, size_t buffer_size,
 		      char* device_id, volatile lp_to_hp_shared_data_t *data)
 {
     snprintf(json_message_buffer, buffer_size, 
-             "{\"id\": \"%s\", \"seq\": %d, \"uptime\": %d, \"temperature\": %d.%d, \"humidity\": %d.%d}", 
+             "{\"id\": \"%s\", \"seq\": %d, \"uptime\": %d, \"temperature\": %s%d.%d, \"humidity\": %d.%d}", 
              device_id,
 	     data->hp_wake_count,
 	     data->lp_wake_count,
-             (data->temp_c_x10) / 10, abs((data->temp_c_x10) % 10), 
-             (data->rh_x10) / 10, abs((data->rh_x10) % 10));    
+             (data->temp_c_x10 < 0) ? "-" : "",               /* Explicitly add negative sign if needed */
+             abs(data->temp_c_x10) / 10,                      /* Absolute value for the whole number portion */
+             abs(data->temp_c_x10) % 10,                      /* Absolute value for the decimal portion */
+             (data->rh_x10) / 10, abs((data->rh_x10) % 10));  /* Humidity is never negative, so it remains unchanged */
 }
 
 void get_topic(char *topic_buffer, size_t topic_buffer_size, char *device_id)
