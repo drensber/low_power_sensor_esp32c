@@ -78,8 +78,15 @@ int main(void)
     while (1) {
 #endif
     // 1. Check wakeup cause
-    hwinfo_get_reset_cause(&cause);
-
+	if (hwinfo_get_reset_cause(&cause) == 0) {
+	    if (!(cause & RESET_LOW_POWER_WAKE) && hp_wake_count != 0) {
+		LOG_ERR("BOOT: Unexpected reset cause: %08x\n", cause);
+	    }
+	    hwinfo_clear_reset_cause(); 
+	} else {
+	    LOG_ERR("BOOT: Could not determine reset cause.\n");
+	}
+    
 #if !(defined(CONFIG_LPS_USE_LIGHT_SLEEP) \
       || defined(CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE))    
     if (cause & RESET_LOW_POWER_WAKE || hp_wake_count == 0) {
@@ -132,16 +139,6 @@ int main(void)
 
 	LOG_DBG("successful_publish = %s",
 		successful_publish ? "true" : "false");
-
-	// Write the receipt directly to the LP core's RTC memory!
-	if (shared_data->most_recent_publish_status_p != NULL) {
-	    *(shared_data->most_recent_publish_status_p) =
-		successful_publish ? PUBLISH_STATUS_SUCCESS : PUBLISH_STATUS_FAILURE;
-	    LOG_DBG("Wrote receipt %d to LP core.",
-		*(shared_data->most_recent_publish_status_p));
-	}
-	
-        k_msleep(50); // Allow logs to flush
     }
 
     else if (first_boot)
@@ -175,9 +172,27 @@ int main(void)
     // 2. Allow UART to flush before cutting power (make sure it's long enough)
     k_msleep(1500); 
 #endif // CONFIG_LOG
+
     // 3. Enable ULP wakeup (keeps LP core powered on!)
     esp_sleep_enable_ulp_wakeup();
+    
+    /* * Disable the MBOX interrupt to prevent race conditions. 
+     * If the LP core fires a new message while we are shutting down, 
+     * the CPU will ignore it, leaving the hardware wake flag perfectly 
+     * intact for the deep sleep wake controller to see.
+     */
+    if (mbox_set_enabled_dt(&rx_channel, 0)) {
+	LOG_ERR("Failed to disable mbox interrupt");
+    }
 
+    // Write the receipt directly to the LP core's RTC memory!
+    if (shared_data->most_recent_publish_status_p != NULL) {
+	*(shared_data->most_recent_publish_status_p) =
+	    successful_publish ? PUBLISH_STATUS_SUCCESS : PUBLISH_STATUS_FAILURE;
+	LOG_DBG("Wrote receipt %d to LP core.",
+		*(shared_data->most_recent_publish_status_p));
+    }
+       
     // 4. Power down or put the HP core to sleep
 #ifndef CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE
 #ifndef CONFIG_LPS_USE_LIGHT_SLEEP

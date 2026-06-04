@@ -203,7 +203,7 @@ bool lps_send_update(volatile lp_to_hp_shared_data_t *sensor_data)
     } else {
         /* Poll the socket and wait for the internal tracking queue to empty,
            proving Zephyr successfully intercepted and processed the incoming PUBACK */
-        int ack_timeout_ms = 15000;
+        int ack_timeout_ms = 20000;
         successful_publish = false;
 
         while (ack_timeout_ms > 0) {
