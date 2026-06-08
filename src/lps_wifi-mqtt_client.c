@@ -77,6 +77,17 @@ static int publish_sensor_data(volatile lp_to_hp_shared_data_t *sdata,
     return mqtt_publish(&client_ctx, &param);
 }
 
+bool lps_transport_init()
+{
+    return true;
+}
+
+
+bool lps_transport_shutdown()
+{
+    return true;
+}
+
 static bool send_mqtt_update(void)
 {
     static struct mqtt_utf8 password;
@@ -204,7 +215,7 @@ static bool send_mqtt_update(void)
     return successful_publish;
 }
 
-bool lps_send_update(volatile lp_to_hp_shared_data_t *data) {
+bool lps_transport_send_update(volatile lp_to_hp_shared_data_t *data) {
     sensor_data = data;
     bool successful_publish = false;
     

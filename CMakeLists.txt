@@ -39,7 +39,7 @@ target_sources(app PRIVATE src/main.c src/lps_shared.c)
 if(CONFIG_LPS_TRANSPORT_WIFI_MQTT)
     target_sources(app PRIVATE src/lps_wifi-mqtt_client.c  src/lps_wifi.c)
 elseif(CONFIG_LPS_TRANSPORT_THREAD_MQTTSN)
-    target_sources(app PRIVATE src/lps_mqtt-sn_client.c)
+    target_sources(app PRIVATE src/lps_thread-mqtt-sn_client.c)
 endif()
 
 target_sources_ifdef(CONFIG_LPS_DHCP_CLIENT app PRIVATE src/lps_dhcp.c)

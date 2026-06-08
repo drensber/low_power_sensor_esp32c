@@ -21,12 +21,11 @@
 #include <ulp_lp_core.h>
 
 #include "shared_data.h"
+#include "lps_transport.h"
 
 LOG_MODULE_REGISTER(lps_hp, CONFIG_LPS_LOG_LEVEL);
 
-extern bool lps_send_update(volatile lp_to_hp_shared_data_t *);
-
-#ifdef CONFIG_LPS_EXPLICIT_LP_IMAGE_LOADING    
+#if defined(CONFIG_LPS_EXPLICIT_LP_IMAGE_LOADING)    
 extern const uint8_t ulp_lp_core_app_start[];
 extern const uint8_t ulp_lp_core_app_end[];
 #endif // CONFIG_LPS_EXPLICIT_LP_IMAGE_LOADING
@@ -42,7 +41,7 @@ const struct mbox_dt_spec tx_channel =
 #define SHM_NODE DT_CHOSEN(zephyr_ipc_shm)
 #define SHM_BASE_ADDR DT_REG_ADDR(SHM_NODE)
 
-/* Create a direct window into the RTC SRAM */
+/* Create a direct window into the RTC SRAM so there's no need to copy */
 volatile lp_to_hp_shared_data_t *shared_data = 
     (volatile lp_to_hp_shared_data_t *)SHM_BASE_ADDR;
 
@@ -71,10 +70,14 @@ static void callback(const struct device *dev,
 int main(void)
 {
     uint32_t cause;
-    bool successful_publish;
+    bool successful_publish = PUBLISH_STATUS_PENDING;
+
+    if (!lps_transport_init()) {
+	LOG_ERR("lps_transport_init() returned false");
+    }
     
-#if defined(CONFIG_LPS_USE_LIGHT_SLEEP) \
-    || defined(CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE)
+    
+#if defined(CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE)
     while (1) {
 #endif
     // 1. Check wakeup cause
@@ -87,8 +90,7 @@ int main(void)
 	    LOG_ERR("BOOT: Could not determine reset cause.\n");
 	}
     
-#if !(defined(CONFIG_LPS_USE_LIGHT_SLEEP) \
-      || defined(CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE))    
+#if !defined(CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE)    
     if (cause & RESET_LOW_POWER_WAKE || hp_wake_count == 0) {
 #else
     if (true) {
@@ -111,17 +113,18 @@ int main(void)
 	    LOG_DBG("enabled mbox");
 	}
 
-	/* first boot requires a bit of a delay to give LP core time to do its initial read */
+	/* First boot requires a bit of a delay to give LP core time to do its initial read */
 	if (hp_wake_count == 0) {
 	    while (shared_data->shared_magic != SHARED_DATA_MAGIC_NUMBER) {
 		k_msleep(50);
 	    }
 	}
 	
-#if defined(CONFIG_LPS_USE_LIGHT_SLEEP) \
-    || defined(CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE)	
+#if defined(CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE)	
 	LOG_DBG("Waiting for message from LP core to appear in mbox");	
-        /* Thread sleeps natively until the callback gives the semaphore */
+        /* Thread sleeps natively until the callback gives the semaphore
+	   we don't bother with the semaphore in the production mode, because
+	   being woken from deep sleep itself serves as the "doorbell" then. */
         k_sem_take(&mbox_sem, K_FOREVER);
 #endif // CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE
 
@@ -135,7 +138,7 @@ int main(void)
 	       shared_data->temp_c_x10, \
 	       shared_data->rh_x10);
 	
-	successful_publish = lps_send_update(shared_data);
+	successful_publish = lps_transport_send_update(shared_data);
 
 	LOG_DBG("successful_publish = %s",
 		successful_publish ? "true" : "false");
@@ -144,7 +147,7 @@ int main(void)
     else if (first_boot)
     {	
 	LOG_DBG(">>> HP BOOT: Cold start.");
-#ifdef CONFIG_LPS_EXPLICIT_LP_IMAGE_LOADING    	
+#if defined(CONFIG_LPS_EXPLICIT_LP_IMAGE_LOADING)    	
         LOG_DBG("   Loading LP firmware... ");
 
         /* Load LP firmware into RTC RAM */
@@ -168,12 +171,12 @@ int main(void)
     
     hp_wake_count++;
 
-#ifdef CONFIG_LOG    
-    // 2. Allow UART to flush before cutting power (make sure it's long enough)
+#if defined(CONFIG_LOG)    
+    // Allow UART to flush before cutting power (make sure it's long enough)
     k_msleep(1500); 
 #endif // CONFIG_LOG
 
-    // 3. Enable ULP wakeup (keeps LP core powered on!)
+    // Enable ULP wakeup (keeps LP core powered on!)
     esp_sleep_enable_ulp_wakeup();
     
     /* * Disable the MBOX interrupt to prevent race conditions. 
@@ -185,7 +188,12 @@ int main(void)
 	LOG_ERR("Failed to disable mbox interrupt");
     }
 
-    // Write the receipt directly to the LP core's RTC memory!
+    if (!lps_transport_shutdown()) {
+	LOG_ERR("lps_transport_shutdown() returned false");
+    }
+       
+    /* Write the receipt indicating success or failure of the event publish directly to
+       the LP core's RTC memory. */
     if (shared_data->most_recent_publish_status_p != NULL) {
 	*(shared_data->most_recent_publish_status_p) =
 	    successful_publish ? PUBLISH_STATUS_SUCCESS : PUBLISH_STATUS_FAILURE;
@@ -193,17 +201,12 @@ int main(void)
 		*(shared_data->most_recent_publish_status_p));
     }
        
-    // 4. Power down or put the HP core to sleep
-#ifndef CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE
-#ifndef CONFIG_LPS_USE_LIGHT_SLEEP
+    // Power down or put the HP core to sleep
+#if !defined(CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE)
     esp_deep_sleep_start();
-#else
-    esp_light_sleep_start();
-#endif // CONFIG_LPS_USE_LIGHT_SLEEP
 #endif // CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE
 
-#if defined(CONFIG_LPS_USE_LIGHT_SLEEP) \
-    || defined(CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE)
+#if defined(CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE)
     /* Drain any extra spurious signals that stacked up to prevent double-execution */
     k_sem_reset(&mbox_sem);
 

@@ -19,7 +19,7 @@ LOG_MODULE_DECLARE(lps_hp, CONFIG_LPS_LOG_LEVEL);
 static uint8_t mqtt_sn_tx_buf[512];
 static uint8_t mqtt_sn_rx_buf[512];
 static struct mqtt_sn_client sn_client;
-static struct mqtt_sn_transport_udp sn_transport; /* Zephyr 4.4 Transport Wrapper */
+static struct mqtt_sn_transport_udp sn_transport;
 
 static volatile bool is_mqtt_sn_connected = false;
 volatile lp_to_hp_shared_data_t *sensor_data;
@@ -42,7 +42,7 @@ static void mqtt_sn_evt_cb(struct mqtt_sn_client *client, const struct mqtt_sn_e
 }
 
 
-/* * Blocks until the OpenThread stack successfully attaches to the mesh.
+/* Blocks until the OpenThread stack successfully attaches to the mesh.
  * Returns true if attached, false if it times out.
  */
 static bool wait_for_thread_mesh(uint32_t timeout_ms) {
@@ -92,13 +92,30 @@ static void pump_mqtt_sn_socket(struct mqtt_sn_transport_udp *transport,
     }
 }
 
-bool lps_send_update(volatile lp_to_hp_shared_data_t *sensor_data) 
+bool lps_transport_init()
+{
+    //settings_load();
+    return true;
+}
+
+bool lps_transport_shutdown()
+{
+    // Force Zephyr to commit OpenThread's dirty frame counters to NVS
+    //settings_save();
+    
+    // Give the hardware SPI flash time to complete the write
+    //k_sleep(K_MSEC(50));
+
+    return true;
+}
+
+bool lps_transport_send_update(volatile lp_to_hp_shared_data_t *sensor_data) 
 {
     static bool successful_publish = false;
-    /* 1. Persistent OS Context */
+    /* Persistent OS Context */
     static bool is_net_initialized = false;
     
-    /* 2. Persistent Payload Memory (Prevents the (null) pointer bug) */
+    /* Persistent Payload Memory (Prevents the (null) pointer bug) */
     char device_id[20];
     char payload[128];
     char topic[64];
@@ -116,9 +133,9 @@ bool lps_send_update(volatile lp_to_hp_shared_data_t *sensor_data)
     pub_topic.data = (uint8_t *)topic;
     pub_topic.size = strlen(topic);
 
-    /* 3. STRICTLY One-Time Initialization */
+    /* One-Time Initialization */
     if (!is_net_initialized) {
-        /* 3. OS Initialization & State Flushing */
+        /* OS Initialization & State Flushing */
 	static bool is_socket_bound = false;
 
 	if (!is_socket_bound) {
@@ -134,7 +151,7 @@ bool lps_send_update(volatile lp_to_hp_shared_data_t *sensor_data)
 	    is_socket_bound = true;
 	}
 
-	/* --- THE FIX: Always re-init the client to flush Zephyr's dirty TX queues --- */
+	/* Always re-init the client to flush Zephyr's dirty TX queues */
 	LOG_DBG("Flushing MQTT-SN Client state...");
 	struct mqtt_sn_data client_id = MQTT_SN_DATA_STRING_LITERAL("esp32c6_sensor");
 	if (mqtt_sn_client_init(&sn_client, &client_id, &sn_transport.tp, mqtt_sn_evt_cb, 
@@ -157,18 +174,22 @@ bool lps_send_update(volatile lp_to_hp_shared_data_t *sensor_data)
     LOG_DBG("Waking up. Waiting for Thread Mesh...");
     wait_for_thread_mesh(30000);
     
-    /* 4. Speed up MAC layer for the transaction */
+    /* Speed up MAC layer for the transaction */
     otInstance *ot = openthread_get_default_instance();
+
+    // TODO: Need to figure out which of these is optimal
+    //if (ot != NULL) otLinkSetPollPeriod(ot, 250);
     if (ot != NULL) otLinkSetPollPeriod(ot, 100);
 
-    /* 5. Connect */
+
+    /* Connect */
     LOG_DBG("--- Connecting ---");
     int retries = 3;
     is_mqtt_sn_connected = false;
 
     while (retries > 0 && !is_mqtt_sn_connected) {
         LOG_DBG("Sending MQTT-SN CONNECT (Attempt %d)...", 4 - retries);
-        
+
         int err = mqtt_sn_connect(&sn_client, false, true);
         if (err != 0) {
             LOG_WRN("Connect API returned %d. Mesh routing likely converging. Waiting...", err);
@@ -193,7 +214,7 @@ bool lps_send_update(volatile lp_to_hp_shared_data_t *sensor_data)
     }
 
 
-    /* 6. Register & Publish with QoS 1 Handshake Confirmation */
+    /* Register & Publish with QoS 1 Handshake Confirmation */
     LOG_DBG("--- Registering & Publishing (QoS 1) ---");
     
     /* Upgrade to QoS 1 so the library tracks the transaction and mandates a PUBACK */
@@ -224,7 +245,7 @@ bool lps_send_update(volatile lp_to_hp_shared_data_t *sensor_data)
         }
     }
 
-    /* 7. Clean Disconnect */
+    /* Clean Disconnect */
     LOG_DBG("--- Disconnecting ---");
     mqtt_sn_disconnect(&sn_client);
     
