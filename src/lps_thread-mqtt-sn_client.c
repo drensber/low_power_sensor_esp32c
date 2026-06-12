@@ -103,8 +103,9 @@ bool lps_transport_shutdown()
     // Force Zephyr to commit OpenThread's dirty frame counters to NVS
     //settings_save();
     
-    // Give the hardware SPI flash time to complete the write
-    //k_sleep(K_MSEC(50));
+    /* Give OpenThread's background tasklet time to flush the incremented 
+       MAC frame counters to the physical NVS flash. */
+    //k_sleep(K_MSEC(500));
 
     return true;
 }
@@ -171,16 +172,23 @@ bool lps_transport_send_update(volatile lp_to_hp_shared_data_t *sensor_data)
         is_net_initialized = true;
     }
 
+    otInstance *ot = openthread_get_default_instance();
+
+    if (ot != NULL ) {
+        /* Tell the Border Router to purge this child from its table 
+           if it goes completely silent for 15 seconds. */
+        otThreadSetChildTimeout(ot, 15);
+    }
+
     LOG_DBG("Waking up. Waiting for Thread Mesh...");
     wait_for_thread_mesh(30000);
     
     /* Speed up MAC layer for the transaction */
-    otInstance *ot = openthread_get_default_instance();
-
     // TODO: Need to figure out which of these is optimal
     //if (ot != NULL) otLinkSetPollPeriod(ot, 250);
-    if (ot != NULL) otLinkSetPollPeriod(ot, 100);
-
+    if (ot != NULL) {
+	otLinkSetPollPeriod(ot, 100);
+    }
 
     /* Connect */
     LOG_DBG("--- Connecting ---");
