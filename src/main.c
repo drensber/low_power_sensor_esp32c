@@ -41,6 +41,10 @@ const struct mbox_dt_spec tx_channel =
 #define SHM_NODE DT_CHOSEN(zephyr_ipc_shm)
 #define SHM_BASE_ADDR DT_REG_ADDR(SHM_NODE)
 
+/* Fetch the hardware mappings from the devicetree aliases */
+static const struct gpio_dt_spec rf_pwr = GPIO_DT_SPEC_GET(DT_ALIAS(rf_pwr), gpios);
+static const struct gpio_dt_spec rf_sel = GPIO_DT_SPEC_GET(DT_ALIAS(rf_sel), gpios);
+
 /* Create a direct window into the RTC SRAM so there's no need to copy */
 volatile lp_to_hp_shared_data_t *shared_data = 
     (volatile lp_to_hp_shared_data_t *)SHM_BASE_ADDR;
@@ -66,20 +70,43 @@ static void callback(const struct device *dev,
     k_sem_give(&mbox_sem);
 }
 
+static void enable_external_antenna(void)
+{
+    if (!gpio_is_ready_dt(&rf_pwr) || !gpio_is_ready_dt(&rf_sel)) {
+        return;
+    }
+
+    /* * Configure pins as outputs and assert them. 
+     * Because of our DT flags, ACTIVE here means:
+     * GPIO 3  -> driven LOW  (Powers the switch)
+     * GPIO 14 -> driven HIGH (Selects U.FL connector)
+     */
+    gpio_pin_configure_dt(&rf_pwr, GPIO_OUTPUT_ACTIVE);
+    gpio_pin_configure_dt(&rf_sel, GPIO_OUTPUT_ACTIVE);
+}
+
+#if !defined(CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE)
+static void disable_external_antenna(void)
+{
+    /* * De-assert pins before entering deep sleep.
+     * INACTIVE here means:
+     * GPIO 3 -> driven HIGH (Cuts power to the switch, saving ~100 µA)
+     */
+    gpio_pin_configure_dt(&rf_pwr, GPIO_OUTPUT_INACTIVE);
+    gpio_pin_configure_dt(&rf_sel, GPIO_OUTPUT_INACTIVE);
+}
+#endif // !CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE
 
 int main(void)
 {
     uint32_t cause;
     bool successful_publish = PUBLISH_STATUS_PENDING;
 
-    if (!lps_transport_init()) {
-	LOG_ERR("lps_transport_init() returned false");
-    }
-    
-    
 #if defined(CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE)
+    enable_external_antenna();
+    
     while (1) {
-#endif
+#else
     // 1. Check wakeup cause
 	if (hwinfo_get_reset_cause(&cause) == 0) {
 	    if (!(cause & RESET_LOW_POWER_WAKE) && hp_wake_count != 0) {
@@ -89,11 +116,18 @@ int main(void)
 	} else {
 	    LOG_ERR("BOOT: Could not determine reset cause.\n");
 	}
-    
-#if !defined(CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE)    
-    if (cause & RESET_LOW_POWER_WAKE || hp_wake_count == 0) {
-#else
+	
+	enable_external_antenna();
+#endif
+	
+    if (!lps_transport_init()) {
+	LOG_ERR("lps_transport_init() returned false");
+    }
+
+#if defined(CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE)
     if (true) {
+#else
+    if (cause & RESET_LOW_POWER_WAKE || hp_wake_count == 0) {	
 #endif
         LOG_DBG(">>> HP WAKE: Woken by LP Core! <<<");
 
@@ -191,7 +225,11 @@ int main(void)
     if (!lps_transport_shutdown()) {
 	LOG_ERR("lps_transport_shutdown() returned false");
     }
-       
+
+#if !defined(CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE)
+    disable_external_antenna();
+#endif // !CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE
+    
     /* Write the receipt indicating success or failure of the event publish directly to
        the LP core's RTC memory. */
     if (shared_data->most_recent_publish_status_p != NULL) {
@@ -204,7 +242,7 @@ int main(void)
     // Power down or put the HP core to sleep
 #if !defined(CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE)
     esp_deep_sleep_start();
-#endif // CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE
+#endif // !CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE
 
 #if defined(CONFIG_LPS_HPCORE_ALWAYS_STAY_AWAKE)
     /* Drain any extra spurious signals that stacked up to prevent double-execution */

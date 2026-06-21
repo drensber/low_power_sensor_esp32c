@@ -181,12 +181,15 @@ bool lps_transport_send_update(volatile lp_to_hp_shared_data_t *sensor_data)
     }
 
     LOG_DBG("Waking up. Waiting for Thread Mesh...");
-    wait_for_thread_mesh(30000);
+    if (! wait_for_thread_mesh(30000)) {
+	LOG_ERR("Never connected to mesh");
+	return false;
+    }
     
     /* Speed up MAC layer for the transaction */
-    // TODO: Need to figure out which of these is optimal
-    //if (ot != NULL) otLinkSetPollPeriod(ot, 250);
     if (ot != NULL) {
+	// TODO: Need to figure out which of these is optimal
+	//otLinkSetPollPeriod(ot, 250);
 	otLinkSetPollPeriod(ot, 100);
     }
 

@@ -8,6 +8,8 @@
 	chosen {
 		zephyr,ipc_shm = &ipc_shm;
 		zephyr,ipc = &mbox0;
+		zephyr,console = &usb_serial;
+		zephyr,shell-uart = &usb_serial;                
 	};
 
         mbox_consumer {
@@ -15,6 +17,31 @@
                mboxes = <&mbox0 0>, <&mbox0 1>;
 	       mbox-names = "tx", "rx";
         };
+
+        aliases {
+                rf-pwr = &rf_pwr_node;
+                rf-sel = &rf_sel_node;
+        };
+
+        rf_control {
+                compatible = "gpio-leds"; 
+        
+                rf_pwr_node: rf_pwr {
+                     /* Active LOW: Setting this to 'active' in
+                        C will drive the pin to 0V */
+                     gpios = <&gpio0 3 GPIO_ACTIVE_LOW>;
+                };
+        
+                rf_sel_node: rf_sel {
+                     /* Active HIGH: Setting this to 'active' in C
+                        will drive the pin to 3.3V */
+                     gpios = <&gpio0 14 GPIO_ACTIVE_HIGH>;
+                };
+        };
+};
+
+&usb_serial {
+	status = "okay";
 };
 
 /* Disable this for production, because it consumes about 100uA */
